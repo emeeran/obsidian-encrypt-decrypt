@@ -6,6 +6,8 @@ import { HardwareSecurityManager, HardwareSecuritySettings } from './src/typescr
 import { HardwareSecuritySetupModal, SecurityStatusDisplay } from './src/typescript/hardware-security-ui';
 import { AdvancedErrorRecovery, ErrorRecoverySettings } from './src/typescript/error-recovery';
 import { ErrorDiagnosticsModal, ErrorRecoveryStatusDisplay } from './src/typescript/error-recovery-ui';
+import { PostQuantumCryptoManager, PostQuantumSettings, HybridEncryptionResult } from './src/typescript/post-quantum';
+import { PostQuantumSetupModal, PostQuantumStatusDisplay } from './src/typescript/post-quantum-ui';
 
 // Custom error classes for better error handling
 class EncryptionError extends Error {
@@ -57,6 +59,9 @@ interface NoteEncryptorSettings {
     // New v2.3.0 settings - Error Recovery
     errorRecovery: ErrorRecoverySettings;
     errorLog: any[]; // Error log storage
+    // New v2.4.0 settings - Post-Quantum Cryptography
+    postQuantum: PostQuantumSettings;
+    postQuantumKeys: Record<string, any>; // For post-quantum key pairs storage
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
@@ -94,7 +99,19 @@ const DEFAULT_SETTINGS: NoteEncryptorSettings = {
         autoBackupEnabled: true,
         backupRetentionDays: 30
     },
-    errorLog: []
+    errorLog: [],
+    // New v2.4.0 post-quantum defaults
+    postQuantum: {
+        enablePostQuantum: false,
+        hybridMode: true,
+        algorithm: 'Kyber',
+        keySize: 2048,
+        securityLevel: 3,
+        experimentalFeatures: false,
+        fallbackToClassical: true,
+        quantumReadiness: true
+    },
+    postQuantumKeys: {}
 }
 
 
@@ -144,6 +161,7 @@ export default class NoteEncryptorPlugin extends Plugin {
     private batchManager: BatchOperationsManager;
     public hardwareSecurityManager: HardwareSecurityManager | null = null;
     public errorRecovery: AdvancedErrorRecovery;
+    public postQuantumManager: PostQuantumCryptoManager;
 
     async onload() {
         await this.loadSettings();
@@ -153,6 +171,9 @@ export default class NoteEncryptorPlugin extends Plugin {
 
         // Initialize error recovery system
         this.errorRecovery = new AdvancedErrorRecovery(this.app, this.settings.errorRecovery);
+
+        // Initialize post-quantum manager
+        this.postQuantumManager = new PostQuantumCryptoManager(this.app, this.settings.postQuantum);
 
         // Initialize hardware security manager if enabled
         if (this.settings.hardwareSecurity?.enabled && HardwareSecurityManager.isSupported()) {
@@ -249,6 +270,41 @@ export default class NoteEncryptorPlugin extends Plugin {
                 this.testErrorRecovery();
             }
         });
+
+        // Post-quantum cryptography commands
+        if (PostQuantumCryptoManager.isSupported()) {
+            this.addCommand({
+                id: 'post-quantum-setup',
+                name: 'Setup post-quantum cryptography',
+                callback: () => {
+                    this.openPostQuantumSetup();
+                }
+            });
+
+            this.addCommand({
+                id: 'post-quantum-encrypt',
+                name: 'Encrypt with quantum-resistant algorithm',
+                callback: () => {
+                    this.encryptWithPostQuantum();
+                }
+            });
+
+            this.addCommand({
+                id: 'post-quantum-generate-key',
+                name: 'Generate post-quantum key pair',
+                callback: () => {
+                    this.generatePostQuantumKeyPair();
+                }
+            });
+
+            this.addCommand({
+                id: 'post-quantum-threat-assessment',
+                name: 'Show quantum threat assessment',
+                callback: () => {
+                    this.showQuantumThreatAssessment();
+                }
+            });
+        }
 
         // Add settings tab
         this.addSettingTab(new NoteEncryptorSettingTab(this.app, this));
@@ -660,6 +716,161 @@ export default class NoteEncryptorPlugin extends Plugin {
                 new Notice('Error recovery system encountered an issue during testing');
             }
         }
+    }
+
+    // Post-Quantum Cryptography Methods
+    openPostQuantumSetup(): void {
+        new PostQuantumSetupModal(
+            this.app,
+            this.settings.postQuantum,
+            (newSettings) => {
+                this.settings.postQuantum = newSettings;
+                this.saveSettings();
+
+                // Reinitialize post-quantum manager with new settings
+                this.postQuantumManager = new PostQuantumCryptoManager(this.app, newSettings);
+                new Notice('Post-quantum settings saved');
+            }
+        ).open();
+    }
+
+    async encryptWithPostQuantum(): Promise<void> {
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView) {
+            new Notice('No active note to encrypt');
+            return;
+        }
+
+        const content = activeView.editor.getValue();
+        if (this.isEncrypted(content)) {
+            new Notice('Note is already encrypted');
+            return;
+        }
+
+        new EnhancedPasswordModal(this.app, true, this.settings, async (password: string) => {
+            const loadingNotice = new Notice('Encrypting with quantum-resistant algorithm...', 0);
+
+            try {
+                // Generate a temporary key pair for this encryption
+                const keyPair = await this.postQuantumManager.generateKeyPair();
+
+                const result = await this.postQuantumManager.hybridEncrypt(content, password, keyPair.publicKey);
+
+                // Store the hybrid result with metadata
+                activeView.editor.setValue(result.combined.ciphertext);
+
+                // Update file name
+                const file = activeView.file;
+                if (file) {
+                    const newBaseName = this.settings.encryptedNotePrefix + file.basename + ' [Post-Quantum]' + this.settings.encryptedNoteSuffix;
+                    const sanitizedName = this.sanitizeFilePath(newBaseName);
+                    const uniqueName = await this.generateUniqueFileName(sanitizedName, '.md');
+                    const newPath = file.parent ? `${file.parent.path}/${uniqueName}` : uniqueName;
+                    await this.app.fileManager.renameFile(file, newPath);
+                }
+
+                loadingNotice.hide();
+                new Notice('Note encrypted with quantum-resistant algorithm successfully');
+
+            } catch (error) {
+                loadingNotice.hide();
+                await this.handleError(error, {
+                    operation: 'post-quantum-encrypt',
+                    file: activeView.file?.path
+                });
+            }
+        }).open();
+    }
+
+    async generatePostQuantumKeyPair(): Promise<void> {
+        const loadingNotice = new Notice('Generating post-quantum key pair...', 0);
+
+        try {
+            const keyPair = await this.postQuantumManager.generateKeyPair();
+            const keyId = `pq_${Date.now()}`;
+
+            loadingNotice.hide();
+            new Notice(`Post-quantum key pair generated: ${keyPair.algorithm}`);
+
+        } catch (error) {
+            loadingNotice.hide();
+            await this.handleError(error, {
+                operation: 'generate-pq-key'
+            });
+        }
+    }
+
+    showQuantumThreatAssessment(): void {
+        const assessment = this.postQuantumManager.getThreatAssessment();
+
+        const modal = new Modal(this.app);
+        modal.contentEl.createEl('h2', { text: 'Quantum Computing Threat Assessment' });
+
+        // Threat status
+        const threatStatus = modal.contentEl.createDiv('threat-status');
+        threatStatus.style.padding = '12px';
+        threatStatus.style.borderRadius = '6px';
+        threatStatus.style.marginBottom = '16px';
+
+        const threatColors = {
+            'none': 'var(--text-success)',
+            'theoretical': 'var(--text-warning)',
+            'practical': 'var(--text-error)'
+        };
+
+        threatStatus.style.backgroundColor = `var(--background-modifier-${assessment.currentThreat === 'practical' ? 'error' : assessment.currentThreat === 'theoretical' ? 'warning' : 'success'})`;
+        threatStatus.createEl('h3', {
+            text: `Current Threat Level: ${assessment.currentThreat.toUpperCase()}`,
+            cls: 'threat-current'
+        }).style.color = threatColors[assessment.currentThreat];
+
+        // Time to break algorithms
+        const breakSection = modal.contentEl.createDiv('break-times');
+        breakSection.createEl('h3', { text: 'Estimated Time to Break with Quantum Computer' });
+
+        const breakList = breakSection.createEl('ul');
+        Object.entries(assessment.timeToBreak).forEach(([algo, time]) => {
+            breakList.createEl('li', { text: `${algo}: ${time}` });
+        });
+
+        // Migration readiness
+        const readinessSection = modal.contentEl.createDiv('migration-readiness');
+        readinessSection.createEl('h3', { text: 'Migration Readiness' });
+
+        const readinessBar = readinessSection.createDiv('readiness-bar');
+        readinessBar.style.width = '100%';
+        readinessBar.style.height = '20px';
+        readinessBar.style.backgroundColor = 'var(--background-modifier-border)';
+        readinessBar.style.borderRadius = '10px';
+        readinessBar.style.overflow = 'hidden';
+
+        const readinessFill = readinessBar.createDiv('readiness-fill');
+        readinessFill.style.width = `${assessment.migrationReadiness}%`;
+        readinessFill.style.height = '100%';
+        readinessFill.style.backgroundColor = assessment.migrationReadiness >= 80 ? 'var(--text-success)' : assessment.migrationReadiness >= 60 ? 'var(--text-warning)' : 'var(--text-error)';
+
+        const readinessText = readinessSection.createEl('p', {
+            text: `Migration Readiness: ${assessment.migrationReadiness}%`,
+            cls: 'readiness-text'
+        });
+
+        // Recommendations
+        const recSection = modal.contentEl.createDiv('recommendations');
+        recSection.createEl('h3', { text: 'Recommendations' });
+
+        const recList = recSection.createEl('ul');
+        assessment.recommendations.forEach(rec => {
+            recList.createEl('li', { text: rec });
+        });
+
+        const button = modal.contentEl.createEl('button', {
+            text: 'Close',
+            cls: 'mod-cta'
+        });
+        button.onclick = () => modal.close();
+        button.style.marginTop = '20px';
+
+        modal.open();
     }
 
     /**
@@ -1207,6 +1418,97 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                 .onClick(() => {
                     this.plugin.testErrorRecovery();
                 }));
+
+        // Post-Quantum Cryptography Settings
+        containerEl.createEl('h3', { text: 'Post-Quantum Cryptography' });
+
+        if (PostQuantumCryptoManager.isSupported()) {
+            containerEl.createEl('p', {
+                text: 'Your device supports post-quantum cryptography for future-proofing against quantum computing threats.',
+                cls: 'support-info'
+            });
+
+            // Post-quantum status
+            const pqStatus = containerEl.createDiv('pq-status');
+            const statusDisplay = new PostQuantumStatusDisplay(pqStatus, this.plugin.postQuantumManager);
+            statusDisplay.update();
+
+            // Settings
+            new Setting(containerEl)
+                .setName('Enable post-quantum cryptography')
+                .setDesc('Use quantum-resistant algorithms for enhanced future security')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.postQuantum?.enablePostQuantum ?? false)
+                    .onChange(async (value) => {
+                        this.plugin.settings.postQuantum.enablePostQuantum = value;
+                        await this.plugin.saveSettings();
+                        this.display(); // Refresh to show/hide additional options
+                    }));
+
+            if (this.plugin.settings.postQuantum?.enablePostQuantum) {
+                // Post-quantum setup button
+                const pqSection = containerEl.createDiv('post-quantum-section');
+
+                new Setting(pqSection)
+                    .setName('Configure post-quantum settings')
+                    .setDesc('Set up quantum-resistant algorithms and key management')
+                    .addButton(button => button
+                        .setButtonText('Post-Quantum Setup')
+                        .setCta()
+                        .onClick(() => {
+                            this.plugin.openPostQuantumSetup();
+                        }));
+
+                // Quick actions
+                const actionsSection = pqSection.createDiv('quick-actions');
+                actionsSection.createEl('h4', { text: 'Quick Actions' });
+
+                const actionsGrid = actionsSection.createDiv('actions-grid');
+                actionsGrid.style.display = 'grid';
+                actionsGrid.style.gridTemplateColumns = '1fr 1fr';
+                actionsGrid.style.gap = '8px';
+
+                const encryptButton = actionsGrid.createEl('button', {
+                    text: 'Quantum Encrypt Current',
+                    cls: 'mod-cta'
+                });
+                encryptButton.onclick = () => {
+                    this.plugin.encryptWithPostQuantum();
+                };
+
+                const keyGenButton = actionsGrid.createEl('button', {
+                    text: 'Generate PQ Keys',
+                    cls: ''
+                });
+                keyGenButton.onclick = () => {
+                    this.plugin.generatePostQuantumKeyPair();
+                };
+
+                const threatButton = actionsGrid.createEl('button', {
+                    text: 'Threat Assessment',
+                    cls: ''
+                });
+                threatButton.onclick = () => {
+                    this.plugin.showQuantumThreatAssessment();
+                };
+
+                const threatStatus = actionsGrid.createEl('div');
+                threatStatus.textContent = 'Quantum Ready: ' + (
+                    this.plugin.settings.postQuantum.quantumReadiness ? 'Yes' : 'No'
+                );
+                threatStatus.style.textAlign = 'center';
+                threatStatus.style.padding = '8px';
+                threatStatus.style.border = '1px solid var(--background-modifier-border)';
+                threatStatus.style.borderRadius = '4px';
+                threatStatus.style.backgroundColor = this.plugin.settings.postQuantum.quantumReadiness ?
+                    'var(--background-modifier-success)' : 'var(--background-modifier-warning)';
+            }
+        } else {
+            containerEl.createEl('p', {
+                text: 'Post-quantum cryptography requires a modern browser with WebAssembly and BigInt support. Please update your browser to access quantum-resistant encryption features.',
+                cls: 'unsupported-info'
+            });
+        }
 
         // Security Information
         containerEl.createEl('h3', { text: 'Security Information' });
