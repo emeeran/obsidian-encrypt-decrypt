@@ -4,6 +4,8 @@ import { BatchOperationsManager } from './src/typescript/batch-operations';
 import { BatchOperationModal } from './src/typescript/batch-ui';
 import { HardwareSecurityManager, HardwareSecuritySettings } from './src/typescript/hardware-security';
 import { HardwareSecuritySetupModal, SecurityStatusDisplay } from './src/typescript/hardware-security-ui';
+import { AdvancedErrorRecovery, ErrorRecoverySettings } from './src/typescript/error-recovery';
+import { ErrorDiagnosticsModal, ErrorRecoveryStatusDisplay } from './src/typescript/error-recovery-ui';
 
 // Custom error classes for better error handling
 class EncryptionError extends Error {
@@ -52,6 +54,9 @@ interface NoteEncryptorSettings {
     // New v2.2.0 settings - Hardware Security
     hardwareSecurity: HardwareSecuritySettings;
     hardwareSecurityKeys: Record<string, any>; // For registered keys storage
+    // New v2.3.0 settings - Error Recovery
+    errorRecovery: ErrorRecoverySettings;
+    errorLog: any[]; // Error log storage
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
@@ -77,7 +82,19 @@ const DEFAULT_SETTINGS: NoteEncryptorSettings = {
         supportedKeyTypes: ['public-key'],
         autoPrompt: false
     },
-    hardwareSecurityKeys: {}
+    hardwareSecurityKeys: {},
+    // New v2.3.0 error recovery defaults
+    errorRecovery: {
+        enableAutoRecovery: true,
+        maxRetryAttempts: 3,
+        retryDelay: 2000, // 2 seconds
+        enableErrorReporting: false,
+        enableErrorLogging: true,
+        enableCrashRecovery: true,
+        autoBackupEnabled: true,
+        backupRetentionDays: 30
+    },
+    errorLog: []
 }
 
 
@@ -126,12 +143,16 @@ export default class NoteEncryptorPlugin extends Plugin {
     private loadingNotice: Notice | null = null;
     private batchManager: BatchOperationsManager;
     public hardwareSecurityManager: HardwareSecurityManager | null = null;
+    public errorRecovery: AdvancedErrorRecovery;
 
     async onload() {
         await this.loadSettings();
 
         // Initialize batch manager
         this.batchManager = new BatchOperationsManager(this.app);
+
+        // Initialize error recovery system
+        this.errorRecovery = new AdvancedErrorRecovery(this.app, this.settings.errorRecovery);
 
         // Initialize hardware security manager if enabled
         if (this.settings.hardwareSecurity?.enabled && HardwareSecurityManager.isSupported()) {
@@ -211,6 +232,23 @@ export default class NoteEncryptorPlugin extends Plugin {
                 }
             });
         }
+
+        // Error recovery commands
+        this.addCommand({
+            id: 'error-recovery-diagnostics',
+            name: 'Open error recovery diagnostics',
+            callback: () => {
+                this.openErrorRecoveryDiagnostics();
+            }
+        });
+
+        this.addCommand({
+            id: 'error-recovery-test',
+            name: 'Test error recovery system',
+            callback: () => {
+                this.testErrorRecovery();
+            }
+        });
 
         // Add settings tab
         this.addSettingTab(new NoteEncryptorSettingTab(this.app, this));
@@ -457,7 +495,51 @@ export default class NoteEncryptorPlugin extends Plugin {
     }
 
     // Centralized error handling
-    private handleError(error: any): void {
+    private async handleError(error: any, context: any = {}): Promise<void> {
+        try {
+            // Use the advanced error recovery system
+            const recoveryResult = await this.errorRecovery.handleError(
+                error instanceof Error ? error : new Error(String(error)),
+                {
+                    operation: context.operation || 'unknown',
+                    file: context.file?.path,
+                    recoverable: context.recoverable !== false,
+                    timestamp: new Date(),
+                    ...context
+                }
+            );
+
+            if (recoveryResult.success) {
+                new Notice('Error recovered: ' + recoveryResult.message);
+
+                // Handle different recovery actions
+                switch (recoveryResult.nextAction) {
+                    case 'retry':
+                        if (context.retryAction) {
+                            await context.retryAction(recoveryResult.data);
+                        }
+                        break;
+                    case 'fallback':
+                        if (context.fallbackAction) {
+                            await context.fallbackAction(recoveryResult.data);
+                        }
+                        break;
+                    case 'skip':
+                        new Notice('Operation skipped due to error');
+                        break;
+                }
+            } else {
+                // Fallback to basic error handling
+                this.showBasicError(error);
+            }
+        } catch (recoveryError) {
+            // If error recovery itself fails, show basic error
+            console.warn('Error recovery failed:', recoveryError);
+            this.showBasicError(error);
+        }
+    }
+
+    private showBasicError(error: any): void {
         if (error instanceof PasswordError) {
             new Notice('Password error: ' + error.message);
         } else if (error instanceof EncryptionError) {
@@ -535,6 +617,49 @@ export default class NoteEncryptorPlugin extends Plugin {
         button.style.marginTop = '20px';
 
         modal.open();
+    }
+
+    // Error Recovery Methods
+    openErrorRecoveryDiagnostics(): void {
+        new ErrorDiagnosticsModal(
+            this.app,
+            this.errorRecovery,
+            this.settings.errorRecovery,
+            (newSettings) => {
+                this.settings.errorRecovery = newSettings;
+                this.saveSettings();
+                new Notice('Error recovery settings saved');
+            }
+        ).open();
+    }
+
+    async testErrorRecovery(): Promise<void> {
+        try {
+            const testError = new Error('This is a test error for validating the recovery system');
+            const result = await this.errorRecovery.handleError(testError, {
+                operation: 'test',
+                recoverable: true,
+                timestamp: new Date()
+            });
+
+            if (result.success) {
+                new Notice('Error recovery test passed');
+            } else {
+                new Notice(`Error recovery test failed: ${result.message}`);
+            }
+        } catch (error) {
+            const errorResult = await this.errorRecovery.handleError(
+                error instanceof Error ? error : new Error(String(error)),
+                {
+                    operation: 'error-recovery-test',
+                    recoverable: false
+                }
+            );
+
+            if (!errorResult.success) {
+                new Notice('Error recovery system encountered an issue during testing');
+            }
+        }
     }
 
     /**
@@ -1056,6 +1181,32 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                 cls: 'unsupported-info'
             });
         }
+
+        // Error Recovery Settings
+        containerEl.createEl('h3', { text: 'Error Recovery' });
+
+        const recoveryStatus = containerEl.createDiv('recovery-status');
+        const statusDisplay = new ErrorRecoveryStatusDisplay(recoveryStatus, this.plugin.errorRecovery);
+        statusDisplay.update();
+
+        new Setting(containerEl)
+            .setName('Open error diagnostics')
+            .setDesc('View error statistics, manage recovery settings, and export error reports')
+            .addButton(button => button
+                .setButtonText('Open Diagnostics')
+                .setCta()
+                .onClick(() => {
+                    this.plugin.openErrorRecoveryDiagnostics();
+                }));
+
+        new Setting(containerEl)
+            .setName('Test error recovery')
+            .setDesc('Test the error recovery system with a simulated error')
+            .addButton(button => button
+                .setButtonText('Test System')
+                .onClick(() => {
+                    this.plugin.testErrorRecovery();
+                }));
 
         // Security Information
         containerEl.createEl('h3', { text: 'Security Information' });
