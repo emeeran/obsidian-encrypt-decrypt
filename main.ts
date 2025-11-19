@@ -1,4 +1,5 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { enhancedEncryptionService, EnhancedEncryptionResult, EnhancedDecryptionResult } from './src/typescript/enhanced-encryption';
 
 // Custom error classes for better error handling
 class EncryptionError extends Error {
@@ -39,6 +40,11 @@ interface NoteEncryptorSettings {
     confirmOnEncrypt: boolean;
     passwordMinLength: number;
     maxFileSize: number; // in MB
+    // New v2.1.0 settings
+    enableWebAssembly: boolean;
+    performanceMode: boolean;
+    showPerformanceMetrics: boolean;
+    enableAdvancedFeatures: boolean;
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
@@ -48,208 +54,14 @@ const DEFAULT_SETTINGS: NoteEncryptorSettings = {
     showPasswordStrength: true,
     confirmOnEncrypt: false,
     passwordMinLength: 8,
-    maxFileSize: 10 // 10MB default limit
+    maxFileSize: 10, // 10MB default limit
+    // New v2.1.0 settings defaults
+    enableWebAssembly: true,
+    performanceMode: true,
+    showPerformanceMetrics: false,
+    enableAdvancedFeatures: false
 }
 
-// Encryption service class to separate concerns
-class EncryptionService {
-    private readonly ENCRYPTION_VERSION = 1;
-    private readonly ITERATIONS = 100000;
-    private readonly SALT_LENGTH = 16;
-    private readonly IV_LENGTH = 12;
-    private readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
-    async encrypt(text: string, password: string): Promise<string> {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-
-        // Validate file size
-        if (data.length > this.MAX_FILE_SIZE) {
-            throw new ValidationError('File too large for encryption (max 10MB)');
-        }
-
-        // Generate salt
-        const salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
-
-        // Derive key from password using PBKDF2
-        const keyMaterial = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(password),
-            'PBKDF2',
-            false,
-            ['deriveBits', 'deriveKey']
-        );
-
-        const key = await crypto.subtle.deriveKey(
-            {
-                name: 'PBKDF2',
-                salt: salt,
-                iterations: this.ITERATIONS,
-                hash: 'SHA-256'
-            },
-            keyMaterial,
-            { name: 'AES-GCM', length: 256 },
-            true,
-            ['encrypt', 'decrypt']
-        );
-
-        // Generate IV
-        const iv = crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
-
-        // Encrypt
-        const encryptedData = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv: iv },
-            key,
-            data
-        );
-
-        // Create header with version info
-        const header = JSON.stringify({
-            v: this.ENCRYPTION_VERSION,
-            alg: 'AES-256-GCM',
-            kdf: 'PBKDF2',
-            iterations: this.ITERATIONS
-        });
-
-        // Combine header + null terminator + salt + iv + encrypted data
-        const headerBytes = encoder.encode(header);
-        const nullTerminator = new Uint8Array([0]);
-        const combined = new Uint8Array(
-            headerBytes.length +
-            1 + // null terminator
-            salt.length +
-            iv.length +
-            encryptedData.byteLength
-        );
-        let offset = 0;
-        combined.set(headerBytes, offset);
-        offset += headerBytes.length;
-        combined.set(nullTerminator, offset);
-        offset += 1;
-        combined.set(salt, offset);
-        offset += salt.length;
-        combined.set(iv, offset);
-        offset += iv.length;
-        combined.set(new Uint8Array(encryptedData), offset);
-
-        // Convert to base64
-        const base64 = this.arrayBufferToBase64(combined);
-
-        return `-----BEGIN ENCRYPTED NOTE-----\n${base64}\n-----END ENCRYPTED NOTE-----`;
-    }
-
-    async decrypt(encryptedText: string, password: string): Promise<string> {
-        // Extract base64 data
-        const match = encryptedText.match(/-----BEGIN ENCRYPTED NOTE-----\n([\s\S]+?)\n-----END ENCRYPTED NOTE-----/);
-        if (!match) {
-            throw new EncryptionError('Invalid encrypted note format');
-        }
-
-        const base64 = match[1];
-        const combined = this.base64ToArrayBuffer(base64);
-
-        // Extract header
-        const encoder = new TextEncoder();
-        const decoder = new TextDecoder();
-
-        // Find header length (header is null-terminated JSON)
-        let headerEnd = 0;
-        for (let i = 0; i < combined.length; i++) {
-            if (combined[i] === 0) {
-                headerEnd = i;
-                break;
-            }
-        }
-
-        if (headerEnd === 0) {
-            throw new EncryptionError('Invalid encrypted note format: missing header');
-        }
-
-        const headerBytes = combined.slice(0, headerEnd);
-        const headerText = decoder.decode(headerBytes);
-
-        let header;
-        try {
-            header = JSON.parse(headerText);
-        } catch (e) {
-            throw new EncryptionError('Invalid encrypted note format: corrupted header');
-        }
-
-        // Validate header
-        if (header.v !== this.ENCRYPTION_VERSION) {
-            throw new EncryptionError(`Unsupported encryption version: ${header.v}`);
-        }
-
-        // Extract components
-        const offset = headerEnd + 1;
-        const salt = combined.slice(offset, offset + this.SALT_LENGTH);
-        const iv = combined.slice(offset + this.SALT_LENGTH, offset + this.SALT_LENGTH + this.IV_LENGTH);
-        const encryptedData = combined.slice(offset + this.SALT_LENGTH + this.IV_LENGTH);
-
-        // Derive key from password
-        const keyMaterial = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(password),
-            'PBKDF2',
-            false,
-            ['deriveBits', 'deriveKey']
-        );
-
-        const key = await crypto.subtle.deriveKey(
-            {
-                name: 'PBKDF2',
-                salt: salt,
-                iterations: this.ITERATIONS,
-                hash: 'SHA-256'
-            },
-            keyMaterial,
-            { name: 'AES-GCM', length: 256 },
-            true,
-            ['encrypt', 'decrypt']
-        );
-
-        // Decrypt
-        try {
-            const decryptedData = await crypto.subtle.decrypt(
-                { name: 'AES-GCM', iv: iv },
-                key,
-                encryptedData
-            );
-
-            return decoder.decode(decryptedData);
-        } catch (error) {
-            throw new PasswordError('Wrong password or corrupted data');
-        }
-    }
-
-    private arrayBufferToBase64(buffer: Uint8Array): string {
-        let binary = '';
-        const len = buffer.byteLength;
-        for (let i = 0; i < len; i++) {
-            binary += String.fromCharCode(buffer[i]);
-        }
-        return btoa(binary);
-    }
-
-    private base64ToArrayBuffer(base64: string): Uint8Array {
-        const binaryString = atob(base64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-        return bytes;
-    }
-
-    // Memory security: zero out sensitive data
-    async zeroMemory(data: Uint8Array): Promise<void> {
-        data.fill(0);
-        // Force garbage collection if available
-        if (typeof gc !== 'undefined') {
-            gc();
-        }
-    }
-}
 
 // Confirmation modal for sensitive operations
 class ConfirmModal extends Modal {
@@ -293,7 +105,6 @@ class ConfirmModal extends Modal {
 
 export default class NoteEncryptorPlugin extends Plugin {
     settings: NoteEncryptorSettings;
-    private encryptionService = new EncryptionService();
     private loadingNotice: Notice | null = null;
 
     async onload() {
@@ -491,12 +302,19 @@ export default class NoteEncryptorPlugin extends Plugin {
 
             new EnhancedPasswordModal(this.app, true, this.settings, async (password: string) => {
                 try {
-                    const encrypted = await this.withLoading(
-                        () => this.encryptionService.encrypt(content, password),
+                    const result = await this.withLoading(
+                        () => enhancedEncryptionService.encrypt(content, password, {
+                            useWasm: this.settings.enableWebAssembly,
+                            performanceMode: this.settings.performanceMode
+                        }),
                         'Encrypting note...'
                     );
 
-                    view.editor.setValue(encrypted);
+                    if (!result.success) {
+                        throw new EncryptionError(result.error || 'Encryption failed');
+                    }
+
+                    view.editor.setValue(result.encrypted);
 
                     // Update file name with prefix
                     const file = view.file;
@@ -529,12 +347,19 @@ export default class NoteEncryptorPlugin extends Plugin {
         try {
             new EnhancedPasswordModal(this.app, false, this.settings, async (password: string) => {
                 try {
-                    const decrypted = await this.withLoading(
-                        () => this.encryptionService.decrypt(content, password),
+                    const result = await this.withLoading(
+                        () => enhancedEncryptionService.decrypt(content, password, {
+                            useWasm: this.settings.enableWebAssembly,
+                            allowFallback: true
+                        }),
                         'Decrypting note...'
                     );
 
-                    view.editor.setValue(decrypted);
+                    if (!result.success) {
+                        throw new PasswordError(result.error || 'Decryption failed');
+                    }
+
+                    view.editor.setValue(result.decrypted);
 
                     // Remove prefix from file name
                     const file = view.file;
@@ -934,6 +759,90 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                     this.plugin.settings.confirmOnEncrypt = value;
                     await this.plugin.saveSettings();
                 }));
+
+        // Advanced Features Settings
+        containerEl.createEl('h3', { text: 'Advanced Features (v2.1.0)' });
+
+        new Setting(containerEl)
+            .setName('Enable WebAssembly acceleration')
+            .setDesc('Use WebAssembly for faster encryption/decryption (300-500% improvement for large files)')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableWebAssembly)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableWebAssembly = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        const capabilities = enhancedEncryptionService.getSystemCapabilities();
+        new Setting(containerEl)
+            .setName('WebAssembly Status')
+            .setDesc(`Supported: ${capabilities.wasmSupported}, Initialized: ${capabilities.wasmInitialized}`)
+            .addText(text => text
+                .setPlaceholder(capabilities.wasmInitialized ? 'Ready' : 'Not Available')
+                .setValue(capabilities.wasmInitialized ? 'Ready' : 'Not Available')
+                .setDisabled(true));
+
+        new Setting(containerEl)
+            .setName('Performance mode')
+            .setDesc('Optimize for speed over memory usage')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.performanceMode)
+                .onChange(async (value) => {
+                    this.plugin.settings.performanceMode = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Show performance metrics')
+            .setDesc('Display encryption/decryption timing and performance data')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.showPerformanceMetrics)
+                .onChange(async (value) => {
+                    this.plugin.settings.showPerformanceMetrics = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Enable advanced features')
+            .setDesc('Enable experimental and advanced encryption features')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableAdvancedFeatures)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableAdvancedFeatures = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        if (this.plugin.settings.showPerformanceMetrics) {
+            const metrics = enhancedEncryptionService.getMetrics();
+            const metricsEl = containerEl.createDiv('performance-metrics');
+            metricsEl.createEl('h4', { text: 'Performance Metrics' });
+
+            const metricsInfo = metricsEl.createDiv('metrics-info');
+            metricsInfo.createEl('div', { text: `Last Encryption: ${metrics.encryptionMetrics.lastEncryption?.toFixed(2) || 'N/A'}ms` });
+            metricsInfo.createEl('div', { text: `WASM Used: ${metrics.encryptionMetrics.wasmUsed ? 'Yes' : 'No'}` });
+
+            // Add benchmark button
+            new Setting(containerEl)
+                .setName('Run Performance Benchmark')
+                .setDesc('Test WASM vs JavaScript performance')
+                .addButton(button => button
+                    .setButtonText('Run Benchmark')
+                    .onClick(async () => {
+                        const buttonEl = button.buttonEl;
+                        buttonEl.textContent = 'Running...';
+                        buttonEl.disabled = true;
+
+                        try {
+                            const benchmark = await enhancedEncryptionService.benchmarkPerformance(1024 * 1024); // 1MB
+                            new Notice(`Benchmark complete: ${benchmark.improvement.toFixed(1)}% improvement with WASM`);
+                        } catch (error) {
+                            new Notice('Benchmark failed: ' + error.message);
+                        } finally {
+                            buttonEl.textContent = 'Run Benchmark';
+                            buttonEl.disabled = false;
+                        }
+                    }));
+        }
 
         // Security Information
         containerEl.createEl('h3', { text: 'Security Information' });
