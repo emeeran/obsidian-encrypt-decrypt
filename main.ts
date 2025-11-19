@@ -1,5 +1,7 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { enhancedEncryptionService, EnhancedEncryptionResult, EnhancedDecryptionResult } from './src/typescript/enhanced-encryption';
+import { BatchOperationsManager } from './src/typescript/batch-operations';
+import { BatchOperationModal } from './src/typescript/batch-ui';
 
 // Custom error classes for better error handling
 class EncryptionError extends Error {
@@ -106,9 +108,13 @@ class ConfirmModal extends Modal {
 export default class NoteEncryptorPlugin extends Plugin {
     settings: NoteEncryptorSettings;
     private loadingNotice: Notice | null = null;
+    private batchManager: BatchOperationsManager;
 
     async onload() {
         await this.loadSettings();
+
+        // Initialize batch manager
+        this.batchManager = new BatchOperationsManager(this.app);
 
         // Add ribbon icon
         this.addRibbonIcon('lock', 'Encrypt/Decrypt Note', () => {
@@ -137,6 +143,23 @@ export default class NoteEncryptorPlugin extends Plugin {
             name: 'Encrypt/Decrypt current note',
             editorCallback: (editor: Editor, view: MarkdownView) => {
                 this.handleEncryptDecrypt();
+            }
+        });
+
+        // Add batch operations commands
+        this.addCommand({
+            id: 'batch-encrypt',
+            name: 'Batch encrypt multiple notes',
+            callback: () => {
+                this.openBatchEncryptModal();
+            }
+        });
+
+        this.addCommand({
+            id: 'batch-decrypt',
+            name: 'Batch decrypt multiple notes',
+            callback: () => {
+                this.openBatchDecryptModal();
             }
         });
 
@@ -399,7 +422,41 @@ export default class NoteEncryptorPlugin extends Plugin {
         }
     }
 
-    
+    // Batch operations methods
+    openBatchEncryptModal(): void {
+        new BatchOperationModal(this.app, 'encrypt').open();
+    }
+
+    openBatchDecryptModal(): void {
+        new BatchOperationModal(this.app, 'decrypt').open();
+    }
+
+    /**
+     * Quick batch encrypt selected files
+     */
+    async quickBatchEncrypt(files?: TFile[]): Promise<void> {
+        if (!files) {
+            // If no files provided, show selection modal
+            this.openBatchEncryptModal();
+            return;
+        }
+
+        new BatchOperationModal(this.app, 'encrypt', files).open();
+    }
+
+    /**
+     * Quick batch decrypt selected files
+     */
+    async quickBatchDecrypt(files?: TFile[]): Promise<void> {
+        if (!files) {
+            // If no files provided, show selection modal
+            this.openBatchDecryptModal();
+            return;
+        }
+
+        new BatchOperationModal(this.app, 'decrypt', files).open();
+    }
+
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     }
