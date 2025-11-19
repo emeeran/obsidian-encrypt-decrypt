@@ -1,0 +1,29 @@
+/* Optional styles for the Note Encryptor plugin */
+
+/* Encrypted note visual indicator */
+.encrypted-note-indicator {
+    color: var(--text-accent);
+    font-weight: bold;
+}
+
+/* Password modal styling */
+.note-encryptor-modal {
+    padding: 20px;
+}
+
+.note-encryptor-modal h2 {
+    margin-bottom: 20px;
+}
+
+/* Settings page */
+.note-encryptor-settings h3 {
+    margin-top: 30px;
+    margin-bottom: 10px;
+}
+
+.note-encryptor-settings p {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    line-height: 1.5;
+    margin-bottom: 10px;
+}
