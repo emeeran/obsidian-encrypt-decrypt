@@ -2,6 +2,8 @@ import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Set
 import { enhancedEncryptionService, EnhancedEncryptionResult, EnhancedDecryptionResult } from './src/typescript/enhanced-encryption';
 import { BatchOperationsManager } from './src/typescript/batch-operations';
 import { BatchOperationModal } from './src/typescript/batch-ui';
+import { HardwareSecurityManager, HardwareSecuritySettings } from './src/typescript/hardware-security';
+import { HardwareSecuritySetupModal, SecurityStatusDisplay } from './src/typescript/hardware-security-ui';
 
 // Custom error classes for better error handling
 class EncryptionError extends Error {
@@ -47,6 +49,9 @@ interface NoteEncryptorSettings {
     performanceMode: boolean;
     showPerformanceMetrics: boolean;
     enableAdvancedFeatures: boolean;
+    // New v2.2.0 settings - Hardware Security
+    hardwareSecurity: HardwareSecuritySettings;
+    hardwareSecurityKeys: Record<string, any>; // For registered keys storage
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
@@ -61,7 +66,18 @@ const DEFAULT_SETTINGS: NoteEncryptorSettings = {
     enableWebAssembly: true,
     performanceMode: true,
     showPerformanceMetrics: false,
-    enableAdvancedFeatures: false
+    enableAdvancedFeatures: false,
+    // New v2.2.0 hardware security defaults
+    hardwareSecurity: {
+        enabled: false,
+        requireHardwareKey: false,
+        fallbackToPassword: true,
+        biometricAuth: false,
+        keyTimeout: 30000, // 30 seconds
+        supportedKeyTypes: ['public-key'],
+        autoPrompt: false
+    },
+    hardwareSecurityKeys: {}
 }
 
 
@@ -109,12 +125,18 @@ export default class NoteEncryptorPlugin extends Plugin {
     settings: NoteEncryptorSettings;
     private loadingNotice: Notice | null = null;
     private batchManager: BatchOperationsManager;
+    public hardwareSecurityManager: HardwareSecurityManager | null = null;
 
     async onload() {
         await this.loadSettings();
 
         // Initialize batch manager
         this.batchManager = new BatchOperationsManager(this.app);
+
+        // Initialize hardware security manager if enabled
+        if (this.settings.hardwareSecurity?.enabled && HardwareSecurityManager.isSupported()) {
+            this.hardwareSecurityManager = new HardwareSecurityManager(this.app, this.settings.hardwareSecurity);
+        }
 
         // Add ribbon icon
         this.addRibbonIcon('lock', 'Encrypt/Decrypt Note', () => {
@@ -162,6 +184,33 @@ export default class NoteEncryptorPlugin extends Plugin {
                 this.openBatchDecryptModal();
             }
         });
+
+        // Hardware security commands
+        if (HardwareSecurityManager.isSupported()) {
+            this.addCommand({
+                id: 'hardware-security-setup',
+                name: 'Setup hardware security keys',
+                callback: () => {
+                    this.openHardwareSecuritySetup();
+                }
+            });
+
+            this.addCommand({
+                id: 'hardware-security-auth',
+                name: 'Authenticate with hardware key',
+                callback: () => {
+                    this.authenticateWithHardwareKey();
+                }
+            });
+
+            this.addCommand({
+                id: 'hardware-security-status',
+                name: 'Show hardware security status',
+                callback: () => {
+                    this.showHardwareSecurityStatus();
+                }
+            });
+        }
 
         // Add settings tab
         this.addSettingTab(new NoteEncryptorSettingTab(this.app, this));
@@ -429,6 +478,63 @@ export default class NoteEncryptorPlugin extends Plugin {
 
     openBatchDecryptModal(): void {
         new BatchOperationModal(this.app, 'decrypt').open();
+    }
+
+    // Hardware Security Methods
+    openHardwareSecuritySetup(): void {
+        new HardwareSecuritySetupModal(
+            this.app,
+            this.settings.hardwareSecurity,
+            (newSettings) => {
+                this.settings.hardwareSecurity = newSettings;
+                this.saveSettings();
+
+                // Reinitialize hardware security manager if needed
+                if (newSettings.enabled && HardwareSecurityManager.isSupported()) {
+                    this.hardwareSecurityManager = new HardwareSecurityManager(this.app, newSettings);
+                } else {
+                    this.hardwareSecurityManager = null;
+                }
+            }
+        ).open();
+    }
+
+    async authenticateWithHardwareKey(): Promise<void> {
+        if (!this.hardwareSecurityManager) {
+            new Notice('Hardware security is not enabled or supported');
+            return;
+        }
+
+        const success = await this.hardwareSecurityManager.authenticate();
+        if (success) {
+            new Notice('Hardware authentication successful');
+        } else {
+            new Notice('Hardware authentication failed');
+        }
+    }
+
+    showHardwareSecurityStatus(): void {
+        if (!this.hardwareSecurityManager) {
+            new Notice('Hardware security is not enabled');
+            return;
+        }
+
+        const status = this.hardwareSecurityManager.getSecurityStatus();
+
+        const modal = new Modal(this.app);
+        modal.contentEl.createEl('h2', { text: 'Hardware Security Status' });
+
+        const statusDisplay = new SecurityStatusDisplay(modal.contentEl, this.hardwareSecurityManager);
+        statusDisplay.update();
+
+        const button = modal.contentEl.createEl('button', {
+            text: 'Close',
+            cls: 'mod-cta'
+        });
+        button.onclick = () => modal.close();
+        button.style.marginTop = '20px';
+
+        modal.open();
     }
 
     /**
@@ -899,6 +1005,56 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                             buttonEl.disabled = false;
                         }
                     }));
+        }
+
+        // Hardware Security Settings
+        containerEl.createEl('h3', { text: 'Hardware Security' });
+
+        if (HardwareSecurityManager.isSupported()) {
+            containerEl.createEl('p', {
+                text: 'Your device supports hardware security keys (WebAuthn/FIDO2) for enhanced authentication.',
+                cls: 'support-info'
+            });
+
+            new Setting(containerEl)
+                .setName('Enable hardware security')
+                .setDesc('Use hardware security keys for enhanced authentication of encrypted notes')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.hardwareSecurity?.enabled ?? false)
+                    .onChange(async (value) => {
+                        this.plugin.settings.hardwareSecurity.enabled = value;
+                        await this.plugin.saveSettings();
+                        this.display(); // Refresh to show/hide additional options
+                    }));
+
+            if (this.plugin.settings.hardwareSecurity?.enabled) {
+                // Hardware security setup button
+                const hardwareSection = containerEl.createDiv('hardware-security-section');
+
+                new Setting(hardwareSection)
+                    .setName('Setup security keys')
+                    .setDesc('Register and manage your hardware security keys')
+                    .addButton(button => button
+                        .setButtonText('Configure Hardware Security')
+                        .setCta()
+                        .onClick(() => {
+                            this.plugin.openHardwareSecuritySetup();
+                        }));
+
+                // Show current status
+                if (this.plugin.hardwareSecurityManager) {
+                    const statusDisplay = new SecurityStatusDisplay(
+                        hardwareSection.createDiv('status-container'),
+                        this.plugin.hardwareSecurityManager
+                    );
+                    statusDisplay.update();
+                }
+            }
+        } else {
+            containerEl.createEl('p', {
+                text: 'Hardware security keys are not supported on this device. Please use a modern browser with WebAuthn support (Chrome, Firefox, Safari, Edge).',
+                cls: 'unsupported-info'
+            });
         }
 
         // Security Information
