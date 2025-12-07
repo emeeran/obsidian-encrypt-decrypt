@@ -1,15 +1,19 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
-import { enhancedEncryptionService, EnhancedEncryptionResult, EnhancedDecryptionResult } from './src/typescript/enhanced-encryption';
+import { App, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { enhancedEncryptionService } from './src/typescript/enhanced-encryption';
 import { BatchOperationsManager } from './src/typescript/batch-operations';
 import { BatchOperationModal } from './src/typescript/batch-ui';
 import { HardwareSecurityManager, HardwareSecuritySettings } from './src/typescript/hardware-security';
 import { HardwareSecuritySetupModal, SecurityStatusDisplay } from './src/typescript/hardware-security-ui';
 import { AdvancedErrorRecovery, ErrorRecoverySettings } from './src/typescript/error-recovery';
 import { ErrorDiagnosticsModal, ErrorRecoveryStatusDisplay } from './src/typescript/error-recovery-ui';
-import { PostQuantumCryptoManager, PostQuantumSettings, HybridEncryptionResult } from './src/typescript/post-quantum';
+import { PostQuantumCryptoManager, PostQuantumSettings } from './src/typescript/post-quantum';
 import { PostQuantumSetupModal, PostQuantumStatusDisplay } from './src/typescript/post-quantum-ui';
 import { AIAnalyzeEngine, AISettings } from './src/typescript/ai-features';
 import { AIAssistantModal, AIPasswordGeneratorModal } from './src/typescript/ai-features-ui';
+// New imports for directory encryption and utilities
+import { DirectoryEncryptionSettings, DEFAULT_DIRECTORY_SETTINGS } from './src/typescript/features/directory-encryption';
+import { DirectorySelectionModal, DirectoryEncryptionModal, DirectoryDecryptionModal } from './src/typescript/ui/directory-modal';
+import { calculatePasswordStrength as calcStrength } from './src/typescript/utils/password-utils';
 
 // Custom error classes for better error handling
 class EncryptionError extends Error {
@@ -67,6 +71,8 @@ interface NoteEncryptorSettings {
     // New v2.5.0 settings - AI-Powered Features
     aiSettings: AISettings;
     aiLearningData: Record<string, any>; // For AI learning and patterns
+    // New v2.6.0 settings - Directory Encryption
+    directoryEncryption: DirectoryEncryptionSettings;
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
@@ -130,7 +136,9 @@ const DEFAULT_SETTINGS: NoteEncryptorSettings = {
         privacyMode: false,
         learningMode: true
     },
-    aiLearningData: {}
+    aiLearningData: {},
+    // New v2.6.0 directory encryption defaults
+    directoryEncryption: DEFAULT_DIRECTORY_SETTINGS
 }
 
 
@@ -139,7 +147,7 @@ class ConfirmModal extends Modal {
     result: boolean = false;
     onSubmit: (confirmed: boolean) => void;
 
-    constructor(app: App, title: string, message: string, onSubmit: (confirmed: boolean) => void) {
+    constructor(app: App, _title: string, _message: string, onSubmit: (confirmed: boolean) => void) {
         super(app);
         this.onSubmit = onSubmit;
     }
@@ -175,13 +183,30 @@ class ConfirmModal extends Modal {
 }
 
 export default class NoteEncryptorPlugin extends Plugin {
-    settings: NoteEncryptorSettings;
+    settings!: NoteEncryptorSettings;
     private loadingNotice: Notice | null = null;
-    private batchManager: BatchOperationsManager;
+    private batchManager!: BatchOperationsManager;
     public hardwareSecurityManager: HardwareSecurityManager | null = null;
-    public errorRecovery: AdvancedErrorRecovery;
-    public postQuantumManager: PostQuantumCryptoManager;
-    public aiEngine: AIAnalyzeEngine;
+    public errorRecovery!: AdvancedErrorRecovery;
+    // Lazy-loaded modules
+    private _postQuantumManager: PostQuantumCryptoManager | null = null;
+    private _aiEngine: AIAnalyzeEngine | null = null;
+
+    // Lazy getter for post-quantum manager
+    get postQuantumManager(): PostQuantumCryptoManager {
+        if (!this._postQuantumManager) {
+            this._postQuantumManager = new PostQuantumCryptoManager(this.app, this.settings.postQuantum);
+        }
+        return this._postQuantumManager;
+    }
+
+    // Lazy getter for AI engine
+    get aiEngine(): AIAnalyzeEngine {
+        if (!this._aiEngine) {
+            this._aiEngine = new AIAnalyzeEngine(this.app, this.settings.aiSettings);
+        }
+        return this._aiEngine;
+    }
 
     async onload() {
         await this.loadSettings();
@@ -192,43 +217,48 @@ export default class NoteEncryptorPlugin extends Plugin {
         // Initialize error recovery system
         this.errorRecovery = new AdvancedErrorRecovery(this.app, this.settings.errorRecovery);
 
-        // Initialize post-quantum manager
-        this.postQuantumManager = new PostQuantumCryptoManager(this.app, this.settings.postQuantum);
-
-        // Initialize AI engine
-        this.aiEngine = new AIAnalyzeEngine(this.app, this.settings.aiSettings);
+        // Post-quantum manager and AI engine are lazy-loaded on first use
 
         // Initialize hardware security manager if enabled
         if (this.settings.hardwareSecurity?.enabled && HardwareSecurityManager.isSupported()) {
             this.hardwareSecurityManager = new HardwareSecurityManager(this.app, this.settings.hardwareSecurity);
         }
 
-        // Add ribbon icon
+        // Add ribbon icon for single note encryption
         this.addRibbonIcon('lock', 'Encrypt/Decrypt Note', () => {
             this.handleEncryptDecrypt();
+        });
+
+        // Add ribbon icon for directory encryption
+        this.addRibbonIcon('folder-lock', 'Encrypt Directory', () => {
+            this.openDirectoryEncryptModal();
         });
 
         // Add commands
         this.addCommand({
             id: 'encrypt-note',
             name: 'Encrypt current note',
-            editorCallback: (editor: Editor, view: MarkdownView) => {
-                this.encryptNote(view);
+            editorCallback: (_editor, ctx) => {
+                if ('getMode' in ctx) {
+                    this.encryptNote(ctx as MarkdownView);
+                }
             }
         });
 
         this.addCommand({
             id: 'decrypt-note',
             name: 'Decrypt current note',
-            editorCallback: (editor: Editor, view: MarkdownView) => {
-                this.decryptNote(view);
+            editorCallback: (_editor, ctx) => {
+                if ('getMode' in ctx) {
+                    this.decryptNote(ctx as MarkdownView);
+                }
             }
         });
 
         this.addCommand({
             id: 'encrypt-decrypt-note',
             name: 'Encrypt/Decrypt current note',
-            editorCallback: (editor: Editor, view: MarkdownView) => {
+            editorCallback: () => {
                 this.handleEncryptDecrypt();
             }
         });
@@ -247,6 +277,31 @@ export default class NoteEncryptorPlugin extends Plugin {
             name: 'Batch decrypt multiple notes',
             callback: () => {
                 this.openBatchDecryptModal();
+            }
+        });
+
+        // Directory encryption commands
+        this.addCommand({
+            id: 'encrypt-directory',
+            name: 'Encrypt entire directory',
+            callback: () => {
+                this.openDirectoryEncryptModal();
+            }
+        });
+
+        this.addCommand({
+            id: 'decrypt-directory',
+            name: 'Decrypt entire directory',
+            callback: () => {
+                this.openDirectoryDecryptModal();
+            }
+        });
+
+        this.addCommand({
+            id: 'encrypt-directory-selective',
+            name: 'Encrypt directory (selective)',
+            callback: () => {
+                this.openDirectorySelectionModal();
             }
         });
 
@@ -379,50 +434,18 @@ export default class NoteEncryptorPlugin extends Plugin {
         if (password.length > 1024) {
             return { valid: false, reason: 'Password too long (max 1024 characters)' };
         }
-        if (this.settings.requireStrongPasswords) {
-            if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
-                return {
-                    valid: false,
-                    reason: 'Password should contain uppercase, lowercase, and numbers'
-                };
-            }
+        if (this.settings.requireStrongPasswords && !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
+            return {
+                valid: false,
+                reason: 'Password should contain uppercase, lowercase, and numbers'
+            };
         }
         return { valid: true };
     }
 
     private calculatePasswordStrength(password: string): PasswordStrength {
-        if (!password) return { score: 0, percentage: 0, text: 'Very Weak', color: '#ff4444' };
-
-        let score = 0;
-        let feedback = [];
-
-        // Length
-        if (password.length >= 8) score++;
-        if (password.length >= 12) score++;
-
-        // Complexity
-        if (/[a-z]/.test(password)) score++;
-        if (/[A-Z]/.test(password)) score++;
-        if (/\d/.test(password)) score++;
-        if (/[^a-zA-Z\d]/.test(password)) score++;
-
-        // Strength mapping
-        const strengthLevels = [
-            { score: 0, text: 'Very Weak', color: '#ff4444' },
-            { score: 1, text: 'Weak', color: '#ff8800' },
-            { score: 2, text: 'Fair', color: '#ffcc00' },
-            { score: 3, text: 'Good', color: '#88cc00' },
-            { score: 4, text: 'Strong', color: '#00cc88' },
-            { score: 5, text: 'Very Strong', color: '#0088ff' }
-        ];
-
-        const strength = strengthLevels[Math.min(score, 5)];
-        return {
-            score: strength.score,
-            percentage: (strength.score / 5) * 100,
-            text: strength.text,
-            color: strength.color
-        };
+        // Use centralized password utility
+        return calcStrength(password);
     }
 
     private sanitizeFilePath(path: string): string {
@@ -457,8 +480,7 @@ export default class NoteEncryptorPlugin extends Plugin {
     ): Promise<T> {
         this.loadingNotice = new Notice(loadingMessage, 0); // 0 = persistent notice
         try {
-            const result = await operation();
-            return result;
+            return await operation();
         } finally {
             if (this.loadingNotice) {
                 this.loadingNotice.hide();
@@ -541,7 +563,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                     view.editor.setValue(result.encrypted);
 
                     // Update file name with prefix
-                    const file = view.file;
+                    const { file } = view;
                     if (file && !file.basename.startsWith(this.settings.encryptedNotePrefix)) {
                         const newBaseName = this.settings.encryptedNotePrefix + file.basename + this.settings.encryptedNoteSuffix;
                         const sanitizedName = this.sanitizeFilePath(newBaseName);
@@ -586,7 +608,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                     view.editor.setValue(result.decrypted);
 
                     // Remove prefix from file name
-                    const file = view.file;
+                    const { file } = view;
                     if (file && file.basename.startsWith(this.settings.encryptedNotePrefix)) {
                         let newBasename = file.basename.slice(this.settings.encryptedNotePrefix.length);
                         if (this.settings.encryptedNoteSuffix && newBasename.endsWith(this.settings.encryptedNoteSuffix)) {
@@ -676,6 +698,49 @@ export default class NoteEncryptorPlugin extends Plugin {
         new BatchOperationModal(this.app, 'decrypt').open();
     }
 
+    // Directory Encryption Methods
+    openDirectoryEncryptModal(): void {
+        // First show directory selection, then encrypt
+        new DirectorySelectionModal(
+            this.app,
+            (folderPath: string) => {
+                new DirectoryEncryptionModal(
+                    this.app,
+                    folderPath,
+                    this.settings.directoryEncryption
+                ).open();
+            }
+        ).open();
+    }
+
+    openDirectoryDecryptModal(): void {
+        // First show directory selection, then decrypt
+        new DirectorySelectionModal(
+            this.app,
+            (folderPath: string) => {
+                new DirectoryDecryptionModal(
+                    this.app,
+                    folderPath,
+                    this.settings.directoryEncryption
+                ).open();
+            }
+        ).open();
+    }
+
+    openDirectorySelectionModal(): void {
+        new DirectorySelectionModal(
+            this.app,
+            async (folderPath: string) => {
+                // Show encryption modal for the selected folder
+                new DirectoryEncryptionModal(
+                    this.app,
+                    folderPath,
+                    this.settings.directoryEncryption
+                ).open();
+            }
+        ).open();
+    }
+
     // Hardware Security Methods
     openHardwareSecuritySetup(): void {
         new HardwareSecuritySetupModal(
@@ -715,8 +780,7 @@ export default class NoteEncryptorPlugin extends Plugin {
             return;
         }
 
-        const status = this.hardwareSecurityManager.getSecurityStatus();
-
+        // Status is retrieved by the StatusDisplay component
         const modal = new Modal(this.app);
         modal.contentEl.createEl('h2', { text: 'Hardware Security Status' });
 
@@ -786,7 +850,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                 this.saveSettings();
 
                 // Reinitialize post-quantum manager with new settings
-                this.postQuantumManager = new PostQuantumCryptoManager(this.app, newSettings);
+                this._postQuantumManager = new PostQuantumCryptoManager(this.app, newSettings);
                 new Notice('Post-quantum settings saved');
             }
         ).open();
@@ -818,7 +882,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                 activeView.editor.setValue(result.combined.ciphertext);
 
                 // Update file name
-                const file = activeView.file;
+                const { file } = activeView;
                 if (file) {
                     const newBaseName = this.settings.encryptedNotePrefix + file.basename + ' [Post-Quantum]' + this.settings.encryptedNoteSuffix;
                     const sanitizedName = this.sanitizeFilePath(newBaseName);
@@ -845,7 +909,7 @@ export default class NoteEncryptorPlugin extends Plugin {
 
         try {
             const keyPair = await this.postQuantumManager.generateKeyPair();
-            const keyId = `pq_${Date.now()}`;
+            // Key ID could be stored for future reference: `pq_${Date.now()}`
 
             loadingNotice.hide();
             new Notice(`Post-quantum key pair generated: ${keyPair.algorithm}`);
@@ -907,7 +971,7 @@ export default class NoteEncryptorPlugin extends Plugin {
         readinessFill.style.height = '100%';
         readinessFill.style.backgroundColor = assessment.migrationReadiness >= 80 ? 'var(--text-success)' : assessment.migrationReadiness >= 60 ? 'var(--text-warning)' : 'var(--text-error)';
 
-        const readinessText = readinessSection.createEl('p', {
+        readinessSection.createEl('p', {
             text: `Migration Readiness: ${assessment.migrationReadiness}%`,
             cls: 'readiness-text'
         });
@@ -942,7 +1006,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                 this.saveSettings();
 
                 // Reinitialize AI engine with new settings
-                this.aiEngine = new AIAnalyzeEngine(this.app, newSettings);
+                this._aiEngine = new AIAnalyzeEngine(this.app, newSettings);
                 new Notice('AI settings saved');
             }
         ).open();
@@ -1128,7 +1192,7 @@ export default class NoteEncryptorPlugin extends Plugin {
 
 // Enhanced password modal with strength indicator and validation
 class EnhancedPasswordModal extends Modal {
-    password: string;
+    password: string = '';
     onSubmit: (password: string) => void;
     isEncrypting: boolean;
     settings: NoteEncryptorSettings;
@@ -1265,7 +1329,7 @@ class EnhancedPasswordModal extends Modal {
             this.close();
             this.onSubmit(this.password);
         } catch (error) {
-            new Notice('Error validating password: ' + error.message);
+            new Notice('Error validating password: ' + (error instanceof Error ? error.message : String(error)));
         }
     }
 
@@ -1373,6 +1437,12 @@ class EnhancedPasswordModal extends Modal {
     }
 
     onClose() {
+        // Security: Clear password from memory
+        this.password = '';
+        if (this.confirmInput) {
+            this.confirmInput.value = '';
+        }
+        
         const { contentEl } = this;
         contentEl.empty();
     }
@@ -1545,7 +1615,7 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                 .addButton(button => button
                     .setButtonText('Run Benchmark')
                     .onClick(async () => {
-                        const buttonEl = button.buttonEl;
+                        const { buttonEl } = button;
                         buttonEl.textContent = 'Running...';
                         buttonEl.disabled = true;
 
@@ -1553,7 +1623,7 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                             const benchmark = await enhancedEncryptionService.benchmarkPerformance(1024 * 1024); // 1MB
                             new Notice(`Benchmark complete: ${benchmark.improvement.toFixed(1)}% improvement with WASM`);
                         } catch (error) {
-                            new Notice('Benchmark failed: ' + error.message);
+                            new Notice('Benchmark failed: ' + (error instanceof Error ? error.message : String(error)));
                         } finally {
                             buttonEl.textContent = 'Run Benchmark';
                             buttonEl.disabled = false;
@@ -1823,7 +1893,7 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
 
         const securityInfo = containerEl.createDiv('security-info');
         securityInfo.createEl('p', {
-            text: 'This plugin uses AES-256-GCM encryption with PBKDF2 key derivation (100,000 iterations). Your password is never stored and cannot be recovered if lost.'
+            text: 'This plugin uses AES-256-GCM encryption with PBKDF2 key derivation (310,000 iterations). Your password is never stored and cannot be recovered if lost.'
         });
 
         securityInfo.createEl('p', {
@@ -1835,15 +1905,60 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
         const encryptionDetails = securityInfo.createDiv('encryption-details');
         encryptionDetails.createEl('div', { text: '• Algorithm: AES-256-GCM (Galois/Counter Mode)' });
         encryptionDetails.createEl('div', { text: '• Key Derivation: PBKDF2 with SHA-256' });
-        encryptionDetails.createEl('div', { text: '• Iterations: 100,000' });
-        encryptionDetails.createEl('div', { text: '• Salt: 128-bit random salt per encryption' });
+        encryptionDetails.createEl('div', { text: '• Iterations: 310,000' });
+        encryptionDetails.createEl('div', { text: '• Salt: 256-bit random salt per encryption' });
         encryptionDetails.createEl('div', { text: '• IV: 96-bit random initialization vector per encryption' });
+
+        // Directory Encryption Settings
+        containerEl.createEl('h2', { text: 'Directory Encryption' });
+
+        new Setting(containerEl)
+            .setName('Include subdirectories')
+            .setDesc('Encrypt files in subdirectories when encrypting a directory')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.directoryEncryption.includeSubdirectories)
+                .onChange(async (value) => {
+                    this.plugin.settings.directoryEncryption.includeSubdirectories = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Skip already encrypted')
+            .setDesc('Skip files that are already encrypted when batch encrypting')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.directoryEncryption.skipEncryptedFiles)
+                .onChange(async (value) => {
+                    this.plugin.settings.directoryEncryption.skipEncryptedFiles = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Create manifest file')
+            .setDesc('Create a manifest file tracking encrypted files in the directory')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.directoryEncryption.createManifest)
+                .onChange(async (value) => {
+                    this.plugin.settings.directoryEncryption.createManifest = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Parallel operations')
+            .setDesc('Number of files to encrypt/decrypt in parallel (1-10)')
+            .addSlider(slider => slider
+                .setLimits(1, 10, 1)
+                .setValue(this.plugin.settings.directoryEncryption.parallelOperations)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.directoryEncryption.parallelOperations = value;
+                    await this.plugin.saveSettings();
+                }));
 
         // Add some basic styling
         this.addSettingsStyles(containerEl);
     }
 
-    private addSettingsStyles(containerEl: HTMLElement): void {
+    private addSettingsStyles(_containerEl: HTMLElement): void {
         const existingStyle = document.getElementById('note-encryptor-settings-styles');
         if (existingStyle) return;
 

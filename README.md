@@ -4,22 +4,27 @@ A lightweight, robust Obsidian plugin that encrypts individual notes with passwo
 
 ## Features
 
-- 🔒 **Strong Encryption**: Uses AES-256-GCM with PBKDF2 key derivation (100,000 iterations)
+- 🔒 **Strong Encryption**: Uses AES-256-GCM with PBKDF2 key derivation (310,000 iterations)
 - 🎯 **Individual Note Encryption**: Encrypt only the notes you want, not your entire vault
+- 📁 **Directory Encryption**: Encrypt all notes in a folder with a single password
 - 🚀 **Lightweight**: Minimal overhead, fast encryption/decryption
 - 🎨 **Visual Indicators**: Automatically adds prefixes to encrypted note filenames (e.g., 🔒)
 - ⌨️ **Multiple Access Methods**: Ribbon icon, commands, and hotkeys
 - 🔐 **Password Confirmation**: Double-check passwords when encrypting to prevent mistakes
 - 📝 **Seamless Integration**: Works with standard markdown files
+- 🔐 **Hardware Security**: Optional WebAuthn/FIDO2 support for hardware security keys
+- 🛡️ **Post-Quantum Ready**: Experimental quantum-resistant encryption options
+- 🤖 **AI Security Assistant**: Smart password suggestions and content analysis
 
 ## Security
 
 - **Encryption Algorithm**: AES-256-GCM (Galois/Counter Mode)
-- **Key Derivation**: PBKDF2 with SHA-256, 100,000 iterations
-- **Salt**: Unique 128-bit random salt for each encryption
+- **Key Derivation**: PBKDF2 with SHA-256, 310,000 iterations
+- **Salt**: Unique 256-bit random salt for each encryption
 - **IV**: Unique 96-bit random initialization vector for each encryption
 - **No Password Storage**: Passwords are never stored or cached
 - **Browser Crypto API**: Uses the native Web Crypto API for secure, tested cryptographic operations
+- **Memory Protection**: Password data is securely zeroed after use
 
 ## Installation
 
@@ -79,6 +84,25 @@ Then copy `main.js` and `manifest.json` to your vault's plugin folder.
    - Use Command Palette: "Encrypt/Decrypt current note"
 3. Enter the password
 4. The note will be decrypted and the 🔒 prefix will be removed
+
+### Directory Encryption
+
+Encrypt all notes in a folder at once:
+
+1. Use one of these methods:
+   - Click the folder lock icon 📁🔒 in the ribbon
+   - Use Command Palette: "Encrypt directory"
+   - Use Command Palette: "Decrypt directory"
+2. Select the folder you want to encrypt/decrypt
+3. Enter a password (all files will use the same password)
+4. Review the files to be processed
+5. Click "Encrypt" or "Decrypt" to process
+
+**Directory Encryption Settings:**
+- **Include subdirectories**: Process files in nested folders
+- **Skip encrypted files**: Don't re-encrypt already encrypted files
+- **Create manifest**: Track which files were encrypted (for decryption)
+- **Parallel operations**: Process multiple files simultaneously (1-10)
 
 ### Settings
 

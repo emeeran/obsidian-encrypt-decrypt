@@ -1,6 +1,19 @@
 /**
  * AI-Powered Security Features
  * Provides intelligent password management, content analysis, and security recommendations
+ * 
+ * ⚠️ IMPORTANT NOTICE ⚠️
+ * The "breach protection" feature in this module is a PLACEHOLDER implementation.
+ * It does NOT actually check passwords against real breach databases like HaveIBeenPwned.
+ * 
+ * For actual breach checking, you would need to:
+ * 1. Integrate with the HaveIBeenPwned API (k-anonymity model)
+ * 2. Use a local breach database
+ * 3. Implement proper rate limiting and caching
+ * 
+ * The current implementation uses heuristic analysis only and should not be relied upon
+ * for actual breach detection. The pattern matching and content analysis features are
+ * functional but operate locally without external API calls.
  */
 
 import { App, Notice, TFile } from 'obsidian';

@@ -1,6 +1,15 @@
 /**
  * WebAssembly Wrapper for Crypto Operations
  * Provides high-performance encryption/decryption with fallback to JavaScript
+ * 
+ * ⚠️ EXPERIMENTAL: This module requires a compiled WebAssembly binary (crypto-wasm.wasm)
+ * that is not yet included in this distribution. The module will automatically fall back
+ * to JavaScript implementations if WASM is unavailable.
+ * 
+ * To enable WASM acceleration:
+ * 1. Compile the C source in src/wasm/crypto-wasm.c using Emscripten
+ * 2. Place the resulting .wasm file in the plugin directory
+ * 3. Enable WebAssembly in plugin settings
  */
 
 export interface WasmEncryptionResult {

@@ -425,10 +425,10 @@ class FileSelectionModal extends SuggestModal<TFile> {
 class BatchProgressModal extends Modal {
     private title: string;
     private totalFiles: number;
-    private progressText: HTMLElement;
-    private progressBar: HTMLElement;
-    private progressFill: HTMLElement;
-    private statusText: HTMLElement;
+    private progressText!: HTMLElement;
+    private progressBar!: HTMLElement;
+    private progressFill!: HTMLElement;
+    private statusText!: HTMLElement;
 
     constructor(app: App, title: string, totalFiles: number) {
         super(app);

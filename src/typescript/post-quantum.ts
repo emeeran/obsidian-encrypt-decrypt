@@ -1,6 +1,20 @@
 /**
  * Post-Quantum Cryptography Implementation
  * Provides quantum-resistant encryption algorithms and hybrid encryption approaches
+ * 
+ * ⚠️ IMPORTANT SECURITY NOTICE ⚠️
+ * This module provides SIMULATED post-quantum cryptography for demonstration purposes.
+ * The implementations are NOT cryptographically secure and should NOT be used for
+ * protecting sensitive data in production environments.
+ * 
+ * For actual quantum-resistant encryption, use established libraries like:
+ * - liboqs (Open Quantum Safe)
+ * - CRYSTALS-Kyber reference implementation
+ * - PQClean
+ * 
+ * The current implementation uses simplified algorithms to demonstrate the API
+ * and workflow of post-quantum encryption without the computational overhead
+ * of real lattice-based cryptography.
  */
 
 import { App, Notice } from 'obsidian';
