@@ -8,6 +8,8 @@ import { AdvancedErrorRecovery, ErrorRecoverySettings } from './src/typescript/e
 import { ErrorDiagnosticsModal, ErrorRecoveryStatusDisplay } from './src/typescript/error-recovery-ui';
 import { PostQuantumCryptoManager, PostQuantumSettings, HybridEncryptionResult } from './src/typescript/post-quantum';
 import { PostQuantumSetupModal, PostQuantumStatusDisplay } from './src/typescript/post-quantum-ui';
+import { AIAnalyzeEngine, AISettings } from './src/typescript/ai-features';
+import { AIAssistantModal, AIPasswordGeneratorModal } from './src/typescript/ai-features-ui';
 
 // Custom error classes for better error handling
 class EncryptionError extends Error {
@@ -62,6 +64,9 @@ interface NoteEncryptorSettings {
     // New v2.4.0 settings - Post-Quantum Cryptography
     postQuantum: PostQuantumSettings;
     postQuantumKeys: Record<string, any>; // For post-quantum key pairs storage
+    // New v2.5.0 settings - AI-Powered Features
+    aiSettings: AISettings;
+    aiLearningData: Record<string, any>; // For AI learning and patterns
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
@@ -111,7 +116,21 @@ const DEFAULT_SETTINGS: NoteEncryptorSettings = {
         fallbackToClassical: true,
         quantumReadiness: true
     },
-    postQuantumKeys: {}
+    postQuantumKeys: {},
+    // New v2.5.0 AI-powered features defaults
+    aiSettings: {
+        enabled: true,
+        autoPasswordGeneration: true,
+        contentAnalysis: true,
+        sensitiveContentDetection: true,
+        securityRecommendations: true,
+        patternAnalysis: true,
+        breachProtection: true,
+        aiAssistance: true,
+        privacyMode: false,
+        learningMode: true
+    },
+    aiLearningData: {}
 }
 
 
@@ -162,6 +181,7 @@ export default class NoteEncryptorPlugin extends Plugin {
     public hardwareSecurityManager: HardwareSecurityManager | null = null;
     public errorRecovery: AdvancedErrorRecovery;
     public postQuantumManager: PostQuantumCryptoManager;
+    public aiEngine: AIAnalyzeEngine;
 
     async onload() {
         await this.loadSettings();
@@ -174,6 +194,9 @@ export default class NoteEncryptorPlugin extends Plugin {
 
         // Initialize post-quantum manager
         this.postQuantumManager = new PostQuantumCryptoManager(this.app, this.settings.postQuantum);
+
+        // Initialize AI engine
+        this.aiEngine = new AIAnalyzeEngine(this.app, this.settings.aiSettings);
 
         // Initialize hardware security manager if enabled
         if (this.settings.hardwareSecurity?.enabled && HardwareSecurityManager.isSupported()) {
@@ -302,6 +325,41 @@ export default class NoteEncryptorPlugin extends Plugin {
                 name: 'Show quantum threat assessment',
                 callback: () => {
                     this.showQuantumThreatAssessment();
+                }
+            });
+        }
+
+        // AI-powered features commands
+        if (this.settings.aiSettings?.enabled) {
+            this.addCommand({
+                id: 'ai-assistant',
+                name: 'Open AI Security Assistant',
+                callback: () => {
+                    this.openAIAssistant();
+                }
+            });
+
+            this.addCommand({
+                id: 'ai-generate-password',
+                name: 'Generate AI-powered password',
+                callback: () => {
+                    this.openAIPasswordGenerator();
+                }
+            });
+
+            this.addCommand({
+                id: 'ai-analyze-content',
+                name: 'Analyze current note with AI',
+                callback: () => {
+                    this.analyzeCurrentNoteWithAI();
+                }
+            });
+
+            this.addCommand({
+                id: 'ai-security-insights',
+                name: 'Get AI security insights',
+                callback: () => {
+                    this.getAISecurityInsights();
                 }
             });
         }
@@ -862,6 +920,166 @@ export default class NoteEncryptorPlugin extends Plugin {
         assessment.recommendations.forEach(rec => {
             recList.createEl('li', { text: rec });
         });
+
+        const button = modal.contentEl.createEl('button', {
+            text: 'Close',
+            cls: 'mod-cta'
+        });
+        button.onclick = () => modal.close();
+        button.style.marginTop = '20px';
+
+        modal.open();
+    }
+
+    // AI-Powered Features Methods
+    openAIAssistant(): void {
+        new AIAssistantModal(
+            this.app,
+            this.aiEngine,
+            this.settings.aiSettings,
+            (newSettings) => {
+                this.settings.aiSettings = newSettings;
+                this.saveSettings();
+
+                // Reinitialize AI engine with new settings
+                this.aiEngine = new AIAnalyzeEngine(this.app, newSettings);
+                new Notice('AI settings saved');
+            }
+        ).open();
+    }
+
+    openAIPasswordGenerator(context: any = {}): void {
+        new AIPasswordGeneratorModal(this.app, this.aiEngine, context).open();
+    }
+
+    async analyzeCurrentNoteWithAI(): Promise<void> {
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView) {
+            new Notice('No active note to analyze');
+            return;
+        }
+
+        try {
+            const content = activeView.editor.getValue();
+            const filePath = activeView.file?.path;
+
+            new Notice('AI analyzing content...', 0);
+            const analysis = await this.aiEngine.analyzeContent(content, filePath);
+
+            this.showContentAnalysisResults(analysis);
+
+            // Learn from this analysis
+            await this.aiEngine.learnFromBehavior('encrypt', {
+                contentLength: content.length,
+                timeOfDay: Date.now()
+            });
+
+        } catch (error) {
+            new Notice('AI analysis failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+        }
+    }
+
+    async getAISecurityInsights(): Promise<void> {
+        try {
+            const insights = await this.aiEngine.getSecurityRecommendations({
+                recentActivity: [], // Would gather from recent operations
+                contentAnalysis: undefined,
+                passwordAnalysis: undefined,
+                userPatterns: [] // Would load from stored patterns
+            });
+
+            this.showAIInsightsModal(insights);
+        } catch (error) {
+            new Notice('Failed to get AI insights: ' + (error instanceof Error ? error.message : 'Unknown error'));
+        }
+    }
+
+    private showContentAnalysisResults(analysis: any): void {
+        const modal = new Modal(this.app);
+        modal.contentEl.createEl('h2', { text: 'AI Content Analysis' });
+
+        // Sensitivity assessment
+        const sensitivitySection = modal.contentEl.createDiv('sensitivity-section');
+        const sensitivityBadge = sensitivitySection.createDiv('sensitivity-badge');
+        sensitivityBadge.style.padding = '8px 16px';
+        sensitivityBadge.style.borderRadius = '20px';
+        sensitivityBadge.style.display = 'inline-block';
+        sensitivityBadge.style.fontWeight = 'bold';
+        sensitivityBadge.style.marginBottom = '16px';
+
+        const colors = {
+            'low': 'var(--text-success)',
+            'medium': 'var(--text-warning)',
+            'high': 'var(--text-error)',
+            'critical': '#8B0000'
+        };
+
+        sensitivityBadge.style.backgroundColor = colors[analysis.sensitivity as keyof typeof colors];
+        sensitivityBadge.style.color = 'white';
+        sensitivityBadge.textContent = `${analysis.sensitivity.toUpperCase()} (${analysis.confidence}% confidence)`;
+
+        // Recommendations
+        if (analysis.recommendations.length > 0) {
+            const recSection = modal.contentEl.createDiv('recommendations');
+            recSection.createEl('h3', { text: 'AI Recommendations' });
+
+            const recList = recSection.createEl('ul');
+            analysis.recommendations.forEach((rec: string) => {
+                recList.createEl('li', { text: rec });
+            });
+        }
+
+        // Suggest encryption if needed
+        if (analysis.shouldEncrypt) {
+            const actionSection = modal.contentEl.createDiv('action-suggestion');
+            actionSection.style.padding = '16px';
+            actionSection.style.border = '1px solid var(--interactive-accent)';
+            actionSection.style.borderRadius = '8px';
+            actionSection.style.marginTop = '16px';
+
+            actionSection.createEl('p', {
+                text: '🔒 AI recommends encrypting this note for security.',
+                cls: 'encryption-recommendation'
+            }).style.fontWeight = 'bold';
+
+            const encryptButton = actionSection.createEl('button', {
+                text: 'Encrypt Now',
+                cls: 'mod-cta'
+            });
+            encryptButton.onclick = () => {
+                modal.close();
+                this.handleEncryptDecrypt(); // Call existing encrypt method
+            };
+        }
+
+        const button = modal.contentEl.createEl('button', {
+            text: 'Close',
+            cls: 'mod-cta'
+        });
+        button.onclick = () => modal.close();
+        button.style.marginTop = '20px';
+
+        modal.open();
+    }
+
+    private showAIInsightsModal(insights: string[]): void {
+        const modal = new Modal(this.app);
+        modal.contentEl.createEl('h2', { text: 'AI Security Insights' });
+
+        const insightsSection = modal.contentEl.createDiv('insights-section');
+        insightsSection.createEl('h3', { text: 'Personalized Security Recommendations' });
+
+        if (insights.length === 0) {
+            insightsSection.createEl('p', {
+                text: 'AI is still learning your patterns. Continue using the plugin to receive personalized insights.',
+                cls: 'learning-status'
+            });
+        } else {
+            const insightsList = insightsSection.createEl('ul');
+            insights.forEach(insight => {
+                insightsList.createEl('li', { text: insight });
+            });
+        }
 
         const button = modal.contentEl.createEl('button', {
             text: 'Close',
@@ -1508,6 +1726,96 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                 text: 'Post-quantum cryptography requires a modern browser with WebAssembly and BigInt support. Please update your browser to access quantum-resistant encryption features.',
                 cls: 'unsupported-info'
             });
+        }
+
+        // AI-Powered Features Settings
+        containerEl.createEl('h3', { text: 'AI-Powered Security Features' });
+
+        // AI status and controls
+        const aiStatus = containerEl.createDiv('ai-status');
+        aiStatus.createEl('h4', { text: 'AI Security Assistant Status' });
+
+        const statusText = this.plugin.settings.aiSettings?.enabled ? '🟢 AI features enabled' : '🔴 AI features disabled';
+        aiStatus.createEl('p', {
+            text: statusText,
+            cls: this.plugin.settings.aiSettings?.enabled ? 'ai-status-enabled' : 'ai-status-disabled'
+        });
+
+        // AI Assistant button
+        new Setting(containerEl)
+            .setName('Open AI Security Assistant')
+            .setDesc('Configure AI-powered security features and analysis tools')
+            .addButton(button => button
+                .setButtonText('AI Assistant')
+                .setCta()
+                .onClick(() => {
+                    this.plugin.openAIAssistant();
+                }));
+
+        // AI Password Generator
+        new Setting(containerEl)
+            .setName('AI Password Generator')
+            .setDesc('Generate intelligent passwords based on content analysis')
+            .addButton(button => button
+                .setButtonText('Generate AI Password')
+                .onClick(() => {
+                    this.plugin.openAIPasswordGenerator();
+                }));
+
+        // Content Analysis
+        new Setting(containerEl)
+            .setName('Analyze Current Note')
+            .setDesc('Use AI to analyze the current note for sensitive information')
+            .addButton(button => button
+                .setButtonText('Analyze with AI')
+                .onClick(() => {
+                    this.plugin.analyzeCurrentNoteWithAI();
+                }));
+
+        // Privacy and Learning settings
+        if (this.plugin.settings.aiSettings?.enabled) {
+            const privacySection = containerEl.createDiv('ai-privacy-settings');
+            privacySection.createEl('h4', { text: 'Privacy & Learning Settings' });
+
+            new Setting(containerEl)
+                .setName('Privacy mode')
+                .setDesc('Disable all AI analysis for maximum privacy')
+                .addToggle((toggle: any) => toggle
+                    .setValue(this.plugin.settings.aiSettings?.privacyMode ?? false)
+                    .onChange(async (value: any) => {
+                        this.plugin.settings.aiSettings.privacyMode = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Learning mode')
+                .setDesc('Allow AI to learn from your security patterns for better recommendations')
+                .addToggle((toggle: any) => toggle
+                    .setValue(this.plugin.settings.aiSettings?.learningMode ?? true)
+                    .onChange(async (value: any) => {
+                        this.plugin.settings.aiSettings.learningMode = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Breach protection')
+                .setDesc('Check passwords against known data breaches')
+                .addToggle((toggle: any) => toggle
+                    .setValue(this.plugin.settings.aiSettings?.breachProtection ?? true)
+                    .onChange(async (value: any) => {
+                        this.plugin.settings.aiSettings.breachProtection = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            // AI Insights button
+            new Setting(containerEl)
+                .setName('Get AI security insights')
+                .setDesc('View personalized security recommendations based on your usage patterns')
+                .addButton((button: any) => button
+                    .setButtonText('View Insights')
+                    .onClick(() => {
+                        this.plugin.getAISecurityInsights();
+                    }));
         }
 
         // Security Information
