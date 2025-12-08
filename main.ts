@@ -1,1452 +1,475 @@
-import { App, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
-import { enhancedEncryptionService } from './src/typescript/enhanced-encryption';
-import { BatchOperationsManager } from './src/typescript/batch-operations';
-import { BatchOperationModal } from './src/typescript/batch-ui';
-import { HardwareSecurityManager, HardwareSecuritySettings } from './src/typescript/hardware-security';
-import { HardwareSecuritySetupModal, SecurityStatusDisplay } from './src/typescript/hardware-security-ui';
-import { AdvancedErrorRecovery, ErrorRecoverySettings } from './src/typescript/error-recovery';
-import { ErrorDiagnosticsModal, ErrorRecoveryStatusDisplay } from './src/typescript/error-recovery-ui';
-import { PostQuantumCryptoManager, PostQuantumSettings } from './src/typescript/post-quantum';
-import { PostQuantumSetupModal, PostQuantumStatusDisplay } from './src/typescript/post-quantum-ui';
-import { AIAnalyzeEngine, AISettings } from './src/typescript/ai-features';
-import { AIAssistantModal, AIPasswordGeneratorModal } from './src/typescript/ai-features-ui';
-// New imports for directory encryption and utilities
-import { DirectoryEncryptionSettings, DEFAULT_DIRECTORY_SETTINGS } from './src/typescript/features/directory-encryption';
-import { DirectorySelectionModal, DirectoryEncryptionModal, DirectoryDecryptionModal } from './src/typescript/ui/directory-modal';
-import { calculatePasswordStrength as calcStrength } from './src/typescript/utils/password-utils';
+/**
+ * Note Encryptor - Obsidian Plugin
+ * Encrypt individual notes with AES-256-GCM encryption
+ * 
+ * @version 1.0.0
+ * @license MIT
+ */
 
-// Custom error classes for better error handling
-class EncryptionError extends Error {
-    constructor(message: string, public cause?: Error) {
-        super(message);
-        this.name = 'EncryptionError';
-    }
-}
+import { App, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
 
-class PasswordError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = 'PasswordError';
-    }
-}
+// ============================================================================
+// Constants
+// ============================================================================
 
-class ValidationError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = 'ValidationError';
-    }
-}
+const CRYPTO_CONSTANTS = {
+    ALGORITHM: 'AES-GCM',
+    KEY_LENGTH: 256,
+    SALT_LENGTH: 16,
+    IV_LENGTH: 12,
+    PBKDF2_ITERATIONS: 310000,
+    ENCRYPTION_HEADER_START: '-----BEGIN ENCRYPTED NOTE-----',
+    ENCRYPTION_HEADER_END: '-----END ENCRYPTED NOTE-----',
+} as const;
 
-// Password strength result interface
-interface PasswordStrength {
-    score: number; // 0-4
-    percentage: number; // 0-100
-    text: string;
-    color: string;
-}
+// ============================================================================
+// Types & Interfaces
+// ============================================================================
 
-// Enhanced settings interface
 interface NoteEncryptorSettings {
     encryptedNotePrefix: string;
     encryptedNoteSuffix: string;
-    requireStrongPasswords: boolean;
     showPasswordStrength: boolean;
-    confirmOnEncrypt: boolean;
     passwordMinLength: number;
-    maxFileSize: number; // in MB
-    // New v2.1.0 settings
-    enableWebAssembly: boolean;
-    performanceMode: boolean;
-    showPerformanceMetrics: boolean;
-    enableAdvancedFeatures: boolean;
-    // New v2.2.0 settings - Hardware Security
-    hardwareSecurity: HardwareSecuritySettings;
-    hardwareSecurityKeys: Record<string, any>; // For registered keys storage
-    // New v2.3.0 settings - Error Recovery
-    errorRecovery: ErrorRecoverySettings;
-    errorLog: any[]; // Error log storage
-    // New v2.4.0 settings - Post-Quantum Cryptography
-    postQuantum: PostQuantumSettings;
-    postQuantumKeys: Record<string, any>; // For post-quantum key pairs storage
-    // New v2.5.0 settings - AI-Powered Features
-    aiSettings: AISettings;
-    aiLearningData: Record<string, any>; // For AI learning and patterns
-    // New v2.6.0 settings - Directory Encryption
-    directoryEncryption: DirectoryEncryptionSettings;
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
     encryptedNotePrefix: '🔒 ',
     encryptedNoteSuffix: '',
-    requireStrongPasswords: true,
     showPasswordStrength: true,
-    confirmOnEncrypt: false,
     passwordMinLength: 8,
-    maxFileSize: 10, // 10MB default limit
-    // New v2.1.0 settings defaults
-    enableWebAssembly: true,
-    performanceMode: true,
-    showPerformanceMetrics: false,
-    enableAdvancedFeatures: false,
-    // New v2.2.0 hardware security defaults
-    hardwareSecurity: {
-        enabled: false,
-        requireHardwareKey: false,
-        fallbackToPassword: true,
-        biometricAuth: false,
-        keyTimeout: 30000, // 30 seconds
-        supportedKeyTypes: ['public-key'],
-        autoPrompt: false
-    },
-    hardwareSecurityKeys: {},
-    // New v2.3.0 error recovery defaults
-    errorRecovery: {
-        enableAutoRecovery: true,
-        maxRetryAttempts: 3,
-        retryDelay: 2000, // 2 seconds
-        enableErrorReporting: false,
-        enableErrorLogging: true,
-        enableCrashRecovery: true,
-        autoBackupEnabled: true,
-        backupRetentionDays: 30
-    },
-    errorLog: [],
-    // New v2.4.0 post-quantum defaults
-    postQuantum: {
-        enablePostQuantum: false,
-        hybridMode: true,
-        algorithm: 'Kyber',
-        keySize: 2048,
-        securityLevel: 3,
-        experimentalFeatures: false,
-        fallbackToClassical: true,
-        quantumReadiness: true
-    },
-    postQuantumKeys: {},
-    // New v2.5.0 AI-powered features defaults
-    aiSettings: {
-        enabled: true,
-        autoPasswordGeneration: true,
-        contentAnalysis: true,
-        sensitiveContentDetection: true,
-        securityRecommendations: true,
-        patternAnalysis: true,
-        breachProtection: true,
-        aiAssistance: true,
-        privacyMode: false,
-        learningMode: true
-    },
-    aiLearningData: {},
-    // New v2.6.0 directory encryption defaults
-    directoryEncryption: DEFAULT_DIRECTORY_SETTINGS
+};
+
+interface PasswordStrength {
+    score: number;
+    percentage: number;
+    text: string;
+    color: string;
 }
 
+// ============================================================================
+// Crypto Utilities
+// ============================================================================
 
-// Confirmation modal for sensitive operations
-class ConfirmModal extends Modal {
-    result: boolean = false;
-    onSubmit: (confirmed: boolean) => void;
-
-    constructor(app: App, _title: string, _message: string, onSubmit: (confirmed: boolean) => void) {
-        super(app);
-        this.onSubmit = onSubmit;
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
     }
-
-    onOpen() {
-        const { contentEl } = this;
-        contentEl.empty();
-
-        contentEl.createEl('h2', { text: 'Confirm Operation' });
-        contentEl.createEl('p', { text: 'Are you sure you want to proceed? This action will modify your note.' });
-
-        const buttonContainer = contentEl.createDiv('modal-button-container');
-
-        const cancelButton = buttonContainer.createEl('button', { text: 'Cancel', cls: 'mod-cta' });
-        const confirmButton = buttonContainer.createEl('button', { text: 'Confirm' });
-
-        cancelButton.onclick = () => {
-            this.result = false;
-            this.close();
-        };
-
-        confirmButton.onclick = () => {
-            this.result = true;
-            this.close();
-        };
-    }
-
-    onClose() {
-        this.onSubmit(this.result);
-        const { contentEl } = this;
-        contentEl.empty();
-    }
+    return btoa(binary);
 }
 
-export default class NoteEncryptorPlugin extends Plugin {
-    settings!: NoteEncryptorSettings;
-    private loadingNotice: Notice | null = null;
-    private batchManager!: BatchOperationsManager;
-    public hardwareSecurityManager: HardwareSecurityManager | null = null;
-    public errorRecovery!: AdvancedErrorRecovery;
-    // Lazy-loaded modules
-    private _postQuantumManager: PostQuantumCryptoManager | null = null;
-    private _aiEngine: AIAnalyzeEngine | null = null;
-
-    // Lazy getter for post-quantum manager
-    get postQuantumManager(): PostQuantumCryptoManager {
-        if (!this._postQuantumManager) {
-            this._postQuantumManager = new PostQuantumCryptoManager(this.app, this.settings.postQuantum);
-        }
-        return this._postQuantumManager;
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
     }
-
-    // Lazy getter for AI engine
-    get aiEngine(): AIAnalyzeEngine {
-        if (!this._aiEngine) {
-            this._aiEngine = new AIAnalyzeEngine(this.app, this.settings.aiSettings);
-        }
-        return this._aiEngine;
-    }
-
-    async onload() {
-        await this.loadSettings();
-
-        // Initialize batch manager
-        this.batchManager = new BatchOperationsManager(this.app);
-
-        // Initialize error recovery system
-        this.errorRecovery = new AdvancedErrorRecovery(this.app, this.settings.errorRecovery);
-
-        // Post-quantum manager and AI engine are lazy-loaded on first use
-
-        // Initialize hardware security manager if enabled
-        if (this.settings.hardwareSecurity?.enabled && HardwareSecurityManager.isSupported()) {
-            this.hardwareSecurityManager = new HardwareSecurityManager(this.app, this.settings.hardwareSecurity);
-        }
-
-        // Add ribbon icon for single note encryption
-        this.addRibbonIcon('lock', 'Encrypt/Decrypt Note', () => {
-            this.handleEncryptDecrypt();
-        });
-
-        // Add ribbon icon for directory encryption
-        this.addRibbonIcon('folder-lock', 'Encrypt Directory', () => {
-            this.openDirectoryEncryptModal();
-        });
-
-        // Add commands
-        this.addCommand({
-            id: 'encrypt-note',
-            name: 'Encrypt current note',
-            editorCallback: (_editor, ctx) => {
-                if ('getMode' in ctx) {
-                    this.encryptNote(ctx as MarkdownView);
-                }
-            }
-        });
-
-        this.addCommand({
-            id: 'decrypt-note',
-            name: 'Decrypt current note',
-            editorCallback: (_editor, ctx) => {
-                if ('getMode' in ctx) {
-                    this.decryptNote(ctx as MarkdownView);
-                }
-            }
-        });
-
-        this.addCommand({
-            id: 'encrypt-decrypt-note',
-            name: 'Encrypt/Decrypt current note',
-            editorCallback: () => {
-                this.handleEncryptDecrypt();
-            }
-        });
-
-        // Add batch operations commands
-        this.addCommand({
-            id: 'batch-encrypt',
-            name: 'Batch encrypt multiple notes',
-            callback: () => {
-                this.openBatchEncryptModal();
-            }
-        });
-
-        this.addCommand({
-            id: 'batch-decrypt',
-            name: 'Batch decrypt multiple notes',
-            callback: () => {
-                this.openBatchDecryptModal();
-            }
-        });
-
-        // Directory encryption commands
-        this.addCommand({
-            id: 'encrypt-directory',
-            name: 'Encrypt entire directory',
-            callback: () => {
-                this.openDirectoryEncryptModal();
-            }
-        });
-
-        this.addCommand({
-            id: 'decrypt-directory',
-            name: 'Decrypt entire directory',
-            callback: () => {
-                this.openDirectoryDecryptModal();
-            }
-        });
-
-        this.addCommand({
-            id: 'encrypt-directory-selective',
-            name: 'Encrypt directory (selective)',
-            callback: () => {
-                this.openDirectorySelectionModal();
-            }
-        });
-
-        // Hardware security commands
-        if (HardwareSecurityManager.isSupported()) {
-            this.addCommand({
-                id: 'hardware-security-setup',
-                name: 'Setup hardware security keys',
-                callback: () => {
-                    this.openHardwareSecuritySetup();
-                }
-            });
-
-            this.addCommand({
-                id: 'hardware-security-auth',
-                name: 'Authenticate with hardware key',
-                callback: () => {
-                    this.authenticateWithHardwareKey();
-                }
-            });
-
-            this.addCommand({
-                id: 'hardware-security-status',
-                name: 'Show hardware security status',
-                callback: () => {
-                    this.showHardwareSecurityStatus();
-                }
-            });
-        }
-
-        // Error recovery commands
-        this.addCommand({
-            id: 'error-recovery-diagnostics',
-            name: 'Open error recovery diagnostics',
-            callback: () => {
-                this.openErrorRecoveryDiagnostics();
-            }
-        });
-
-        this.addCommand({
-            id: 'error-recovery-test',
-            name: 'Test error recovery system',
-            callback: () => {
-                this.testErrorRecovery();
-            }
-        });
-
-        // Post-quantum cryptography commands
-        if (PostQuantumCryptoManager.isSupported()) {
-            this.addCommand({
-                id: 'post-quantum-setup',
-                name: 'Setup post-quantum cryptography',
-                callback: () => {
-                    this.openPostQuantumSetup();
-                }
-            });
-
-            this.addCommand({
-                id: 'post-quantum-encrypt',
-                name: 'Encrypt with quantum-resistant algorithm',
-                callback: () => {
-                    this.encryptWithPostQuantum();
-                }
-            });
-
-            this.addCommand({
-                id: 'post-quantum-generate-key',
-                name: 'Generate post-quantum key pair',
-                callback: () => {
-                    this.generatePostQuantumKeyPair();
-                }
-            });
-
-            this.addCommand({
-                id: 'post-quantum-threat-assessment',
-                name: 'Show quantum threat assessment',
-                callback: () => {
-                    this.showQuantumThreatAssessment();
-                }
-            });
-        }
-
-        // AI-powered features commands
-        if (this.settings.aiSettings?.enabled) {
-            this.addCommand({
-                id: 'ai-assistant',
-                name: 'Open AI Security Assistant',
-                callback: () => {
-                    this.openAIAssistant();
-                }
-            });
-
-            this.addCommand({
-                id: 'ai-generate-password',
-                name: 'Generate AI-powered password',
-                callback: () => {
-                    this.openAIPasswordGenerator();
-                }
-            });
-
-            this.addCommand({
-                id: 'ai-analyze-content',
-                name: 'Analyze current note with AI',
-                callback: () => {
-                    this.analyzeCurrentNoteWithAI();
-                }
-            });
-
-            this.addCommand({
-                id: 'ai-security-insights',
-                name: 'Get AI security insights',
-                callback: () => {
-                    this.getAISecurityInsights();
-                }
-            });
-        }
-
-        // Add settings tab
-        this.addSettingTab(new NoteEncryptorSettingTab(this.app, this));
-    }
-
-    // Input validation methods
-    private validatePassword(password: string): { valid: boolean; reason?: string } {
-        if (!password || password.length < this.settings.passwordMinLength) {
-            return {
-                valid: false,
-                reason: `Password must be at least ${this.settings.passwordMinLength} characters`
-            };
-        }
-        if (password.length > 1024) {
-            return { valid: false, reason: 'Password too long (max 1024 characters)' };
-        }
-        if (this.settings.requireStrongPasswords && !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
-            return {
-                valid: false,
-                reason: 'Password should contain uppercase, lowercase, and numbers'
-            };
-        }
-        return { valid: true };
-    }
-
-    private calculatePasswordStrength(password: string): PasswordStrength {
-        // Use centralized password utility
-        return calcStrength(password);
-    }
-
-    private sanitizeFilePath(path: string): string {
-        // Prevent path traversal attacks
-        return path.replace(/\.\./g, '').replace(/[\\/]/g, '_');
-    }
-
-    private async validateFileSize(content: string): Promise<void> {
-        const maxSizeBytes = this.settings.maxFileSize * 1024 * 1024;
-        const size = new TextEncoder().encode(content).length;
-        if (size > maxSizeBytes) {
-            throw new ValidationError(`File too large for encryption (max ${this.settings.maxFileSize}MB)`);
-        }
-    }
-
-    private async generateUniqueFileName(baseName: string, extension: string): Promise<string> {
-        let counter = 1;
-        let fileName = `${baseName}${extension}`;
-
-        while (await this.app.vault.getAbstractFileByPath(fileName)) {
-            fileName = `${baseName} (${counter})${extension}`;
-            counter++;
-        }
-
-        return fileName;
-    }
-
-    // Loading state management
-    private async withLoading<T>(
-        operation: () => Promise<T>,
-        loadingMessage: string
-    ): Promise<T> {
-        this.loadingNotice = new Notice(loadingMessage, 0); // 0 = persistent notice
-        try {
-            return await operation();
-        } finally {
-            if (this.loadingNotice) {
-                this.loadingNotice.hide();
-                this.loadingNotice = null;
-            }
-        }
-    }
-
-    // Confirmation dialog helper
-    private async confirmOperation(
-        title: string,
-        message: string
-    ): Promise<boolean> {
-        return new Promise((resolve) => {
-            new ConfirmModal(this.app, title, message, (confirmed) => {
-                resolve(confirmed);
-            }).open();
-        });
-    }
-
-    async handleEncryptDecrypt() {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!view) {
-            new Notice('No active note found');
-            return;
-        }
-
-        try {
-            const content = view.editor.getValue();
-            await this.validateFileSize(content);
-
-            if (this.isEncrypted(content)) {
-                await this.decryptNote(view);
-            } else {
-                await this.encryptNote(view);
-            }
-        } catch (error) {
-            this.handleError(error);
-        }
-    }
-
-    isEncrypted(content: string): boolean {
-        return content.startsWith('-----BEGIN ENCRYPTED NOTE-----');
-    }
-
-    async encryptNote(view: MarkdownView) {
-        const content = view.editor.getValue();
-
-        if (this.isEncrypted(content)) {
-            new Notice('Note is already encrypted');
-            return;
-        }
-
-        try {
-            await this.validateFileSize(content);
-
-            // Show confirmation dialog if enabled
-            if (this.settings.confirmOnEncrypt) {
-                const confirmed = await this.confirmOperation(
-                    'Encrypt Note',
-                    'Are you sure you want to encrypt this note? Make sure you remember the password as it cannot be recovered.'
-                );
-                if (!confirmed) return;
-            }
-
-            new EnhancedPasswordModal(this.app, true, this.settings, async (password: string) => {
-                try {
-                    const result = await this.withLoading(
-                        () => enhancedEncryptionService.encrypt(content, password, {
-                            useWasm: this.settings.enableWebAssembly,
-                            performanceMode: this.settings.performanceMode
-                        }),
-                        'Encrypting note...'
-                    );
-
-                    if (!result.success) {
-                        throw new EncryptionError(result.error || 'Encryption failed');
-                    }
-
-                    view.editor.setValue(result.encrypted);
-
-                    // Update file name with prefix
-                    const { file } = view;
-                    if (file && !file.basename.startsWith(this.settings.encryptedNotePrefix)) {
-                        const newBaseName = this.settings.encryptedNotePrefix + file.basename + this.settings.encryptedNoteSuffix;
-                        const sanitizedName = this.sanitizeFilePath(newBaseName);
-                        const uniqueName = await this.generateUniqueFileName(sanitizedName, '.md');
-                        const newPath = file.parent ? `${file.parent.path}/${uniqueName}` : uniqueName;
-                        await this.app.fileManager.renameFile(file, newPath);
-                    }
-
-                    new Notice('Note encrypted successfully');
-                } catch (error) {
-                    this.handleError(error);
-                }
-            }).open();
-        } catch (error) {
-            this.handleError(error);
-        }
-    }
-
-    async decryptNote(view: MarkdownView) {
-        const content = view.editor.getValue();
-
-        if (!this.isEncrypted(content)) {
-            new Notice('Note is not encrypted');
-            return;
-        }
-
-        try {
-            new EnhancedPasswordModal(this.app, false, this.settings, async (password: string) => {
-                try {
-                    const result = await this.withLoading(
-                        () => enhancedEncryptionService.decrypt(content, password, {
-                            useWasm: this.settings.enableWebAssembly,
-                            allowFallback: true
-                        }),
-                        'Decrypting note...'
-                    );
-
-                    if (!result.success) {
-                        throw new PasswordError(result.error || 'Decryption failed');
-                    }
-
-                    view.editor.setValue(result.decrypted);
-
-                    // Remove prefix from file name
-                    const { file } = view;
-                    if (file && file.basename.startsWith(this.settings.encryptedNotePrefix)) {
-                        let newBasename = file.basename.slice(this.settings.encryptedNotePrefix.length);
-                        if (this.settings.encryptedNoteSuffix && newBasename.endsWith(this.settings.encryptedNoteSuffix)) {
-                            newBasename = newBasename.slice(0, -this.settings.encryptedNoteSuffix.length);
-                        }
-                        const sanitizedName = this.sanitizeFilePath(newBasename);
-                        const uniqueName = await this.generateUniqueFileName(sanitizedName, '.md');
-                        const newPath = file.parent ? `${file.parent.path}/${uniqueName}` : uniqueName;
-                        await this.app.fileManager.renameFile(file, newPath);
-                    }
-
-                    new Notice('Note decrypted successfully');
-                } catch (error) {
-                    this.handleError(error);
-                }
-            }).open();
-        } catch (error) {
-            this.handleError(error);
-        }
-    }
-
-    // Centralized error handling
-    private async handleError(error: any, context: any = {}): Promise<void> {
-        try {
-            // Use the advanced error recovery system
-            const recoveryResult = await this.errorRecovery.handleError(
-                error instanceof Error ? error : new Error(String(error)),
-                {
-                    operation: context.operation || 'unknown',
-                    file: context.file?.path,
-                    recoverable: context.recoverable !== false,
-                    timestamp: new Date(),
-                    ...context
-                }
-            );
-
-            if (recoveryResult.success) {
-                new Notice('Error recovered: ' + recoveryResult.message);
-
-                // Handle different recovery actions
-                switch (recoveryResult.nextAction) {
-                    case 'retry':
-                        if (context.retryAction) {
-                            await context.retryAction(recoveryResult.data);
-                        }
-                        break;
-                    case 'fallback':
-                        if (context.fallbackAction) {
-                            await context.fallbackAction(recoveryResult.data);
-                        }
-                        break;
-                    case 'skip':
-                        new Notice('Operation skipped due to error');
-                        break;
-                }
-            } else {
-                // Fallback to basic error handling
-                this.showBasicError(error);
-            }
-        } catch (recoveryError) {
-            // If error recovery itself fails, show basic error
-            console.warn('Error recovery failed:', recoveryError);
-            this.showBasicError(error);
-        }
-    }
-
-    private showBasicError(error: any): void {
-        if (error instanceof PasswordError) {
-            new Notice('Password error: ' + error.message);
-        } else if (error instanceof EncryptionError) {
-            new Notice('Encryption error: ' + error.message);
-            console.error('Encryption error:', error.cause);
-        } else if (error instanceof ValidationError) {
-            new Notice('Validation error: ' + error.message);
-        } else {
-            new Notice('Unexpected error occurred');
-            console.error('Unexpected error:', error);
-        }
-    }
-
-    // Batch operations methods
-    openBatchEncryptModal(): void {
-        new BatchOperationModal(this.app, 'encrypt').open();
-    }
-
-    openBatchDecryptModal(): void {
-        new BatchOperationModal(this.app, 'decrypt').open();
-    }
-
-    // Directory Encryption Methods
-    openDirectoryEncryptModal(): void {
-        // First show directory selection, then encrypt
-        new DirectorySelectionModal(
-            this.app,
-            (folderPath: string) => {
-                new DirectoryEncryptionModal(
-                    this.app,
-                    folderPath,
-                    this.settings.directoryEncryption
-                ).open();
-            }
-        ).open();
-    }
-
-    openDirectoryDecryptModal(): void {
-        // First show directory selection, then decrypt
-        new DirectorySelectionModal(
-            this.app,
-            (folderPath: string) => {
-                new DirectoryDecryptionModal(
-                    this.app,
-                    folderPath,
-                    this.settings.directoryEncryption
-                ).open();
-            }
-        ).open();
-    }
-
-    openDirectorySelectionModal(): void {
-        new DirectorySelectionModal(
-            this.app,
-            async (folderPath: string) => {
-                // Show encryption modal for the selected folder
-                new DirectoryEncryptionModal(
-                    this.app,
-                    folderPath,
-                    this.settings.directoryEncryption
-                ).open();
-            }
-        ).open();
-    }
-
-    // Hardware Security Methods
-    openHardwareSecuritySetup(): void {
-        new HardwareSecuritySetupModal(
-            this.app,
-            this.settings.hardwareSecurity,
-            (newSettings) => {
-                this.settings.hardwareSecurity = newSettings;
-                this.saveSettings();
-
-                // Reinitialize hardware security manager if needed
-                if (newSettings.enabled && HardwareSecurityManager.isSupported()) {
-                    this.hardwareSecurityManager = new HardwareSecurityManager(this.app, newSettings);
-                } else {
-                    this.hardwareSecurityManager = null;
-                }
-            }
-        ).open();
-    }
-
-    async authenticateWithHardwareKey(): Promise<void> {
-        if (!this.hardwareSecurityManager) {
-            new Notice('Hardware security is not enabled or supported');
-            return;
-        }
-
-        const success = await this.hardwareSecurityManager.authenticate();
-        if (success) {
-            new Notice('Hardware authentication successful');
-        } else {
-            new Notice('Hardware authentication failed');
-        }
-    }
-
-    showHardwareSecurityStatus(): void {
-        if (!this.hardwareSecurityManager) {
-            new Notice('Hardware security is not enabled');
-            return;
-        }
-
-        // Status is retrieved by the StatusDisplay component
-        const modal = new Modal(this.app);
-        modal.contentEl.createEl('h2', { text: 'Hardware Security Status' });
-
-        const statusDisplay = new SecurityStatusDisplay(modal.contentEl, this.hardwareSecurityManager);
-        statusDisplay.update();
-
-        const button = modal.contentEl.createEl('button', {
-            text: 'Close',
-            cls: 'mod-cta'
-        });
-        button.onclick = () => modal.close();
-        button.style.marginTop = '20px';
-
-        modal.open();
-    }
-
-    // Error Recovery Methods
-    openErrorRecoveryDiagnostics(): void {
-        new ErrorDiagnosticsModal(
-            this.app,
-            this.errorRecovery,
-            this.settings.errorRecovery,
-            (newSettings) => {
-                this.settings.errorRecovery = newSettings;
-                this.saveSettings();
-                new Notice('Error recovery settings saved');
-            }
-        ).open();
-    }
-
-    async testErrorRecovery(): Promise<void> {
-        try {
-            const testError = new Error('This is a test error for validating the recovery system');
-            const result = await this.errorRecovery.handleError(testError, {
-                operation: 'test',
-                recoverable: true,
-                timestamp: new Date()
-            });
-
-            if (result.success) {
-                new Notice('Error recovery test passed');
-            } else {
-                new Notice(`Error recovery test failed: ${result.message}`);
-            }
-        } catch (error) {
-            const errorResult = await this.errorRecovery.handleError(
-                error instanceof Error ? error : new Error(String(error)),
-                {
-                    operation: 'error-recovery-test',
-                    recoverable: false
-                }
-            );
-
-            if (!errorResult.success) {
-                new Notice('Error recovery system encountered an issue during testing');
-            }
-        }
-    }
-
-    // Post-Quantum Cryptography Methods
-    openPostQuantumSetup(): void {
-        new PostQuantumSetupModal(
-            this.app,
-            this.settings.postQuantum,
-            (newSettings) => {
-                this.settings.postQuantum = newSettings;
-                this.saveSettings();
-
-                // Reinitialize post-quantum manager with new settings
-                this._postQuantumManager = new PostQuantumCryptoManager(this.app, newSettings);
-                new Notice('Post-quantum settings saved');
-            }
-        ).open();
-    }
-
-    async encryptWithPostQuantum(): Promise<void> {
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!activeView) {
-            new Notice('No active note to encrypt');
-            return;
-        }
-
-        const content = activeView.editor.getValue();
-        if (this.isEncrypted(content)) {
-            new Notice('Note is already encrypted');
-            return;
-        }
-
-        new EnhancedPasswordModal(this.app, true, this.settings, async (password: string) => {
-            const loadingNotice = new Notice('Encrypting with quantum-resistant algorithm...', 0);
-
-            try {
-                // Generate a temporary key pair for this encryption
-                const keyPair = await this.postQuantumManager.generateKeyPair();
-
-                const result = await this.postQuantumManager.hybridEncrypt(content, password, keyPair.publicKey);
-
-                // Store the hybrid result with metadata
-                activeView.editor.setValue(result.combined.ciphertext);
-
-                // Update file name
-                const { file } = activeView;
-                if (file) {
-                    const newBaseName = this.settings.encryptedNotePrefix + file.basename + ' [Post-Quantum]' + this.settings.encryptedNoteSuffix;
-                    const sanitizedName = this.sanitizeFilePath(newBaseName);
-                    const uniqueName = await this.generateUniqueFileName(sanitizedName, '.md');
-                    const newPath = file.parent ? `${file.parent.path}/${uniqueName}` : uniqueName;
-                    await this.app.fileManager.renameFile(file, newPath);
-                }
-
-                loadingNotice.hide();
-                new Notice('Note encrypted with quantum-resistant algorithm successfully');
-
-            } catch (error) {
-                loadingNotice.hide();
-                await this.handleError(error, {
-                    operation: 'post-quantum-encrypt',
-                    file: activeView.file?.path
-                });
-            }
-        }).open();
-    }
-
-    async generatePostQuantumKeyPair(): Promise<void> {
-        const loadingNotice = new Notice('Generating post-quantum key pair...', 0);
-
-        try {
-            const keyPair = await this.postQuantumManager.generateKeyPair();
-            // Key ID could be stored for future reference: `pq_${Date.now()}`
-
-            loadingNotice.hide();
-            new Notice(`Post-quantum key pair generated: ${keyPair.algorithm}`);
-
-        } catch (error) {
-            loadingNotice.hide();
-            await this.handleError(error, {
-                operation: 'generate-pq-key'
-            });
-        }
-    }
-
-    showQuantumThreatAssessment(): void {
-        const assessment = this.postQuantumManager.getThreatAssessment();
-
-        const modal = new Modal(this.app);
-        modal.contentEl.createEl('h2', { text: 'Quantum Computing Threat Assessment' });
-
-        // Threat status
-        const threatStatus = modal.contentEl.createDiv('threat-status');
-        threatStatus.style.padding = '12px';
-        threatStatus.style.borderRadius = '6px';
-        threatStatus.style.marginBottom = '16px';
-
-        const threatColors = {
-            'none': 'var(--text-success)',
-            'theoretical': 'var(--text-warning)',
-            'practical': 'var(--text-error)'
-        };
-
-        threatStatus.style.backgroundColor = `var(--background-modifier-${assessment.currentThreat === 'practical' ? 'error' : assessment.currentThreat === 'theoretical' ? 'warning' : 'success'})`;
-        threatStatus.createEl('h3', {
-            text: `Current Threat Level: ${assessment.currentThreat.toUpperCase()}`,
-            cls: 'threat-current'
-        }).style.color = threatColors[assessment.currentThreat];
-
-        // Time to break algorithms
-        const breakSection = modal.contentEl.createDiv('break-times');
-        breakSection.createEl('h3', { text: 'Estimated Time to Break with Quantum Computer' });
-
-        const breakList = breakSection.createEl('ul');
-        Object.entries(assessment.timeToBreak).forEach(([algo, time]) => {
-            breakList.createEl('li', { text: `${algo}: ${time}` });
-        });
-
-        // Migration readiness
-        const readinessSection = modal.contentEl.createDiv('migration-readiness');
-        readinessSection.createEl('h3', { text: 'Migration Readiness' });
-
-        const readinessBar = readinessSection.createDiv('readiness-bar');
-        readinessBar.style.width = '100%';
-        readinessBar.style.height = '20px';
-        readinessBar.style.backgroundColor = 'var(--background-modifier-border)';
-        readinessBar.style.borderRadius = '10px';
-        readinessBar.style.overflow = 'hidden';
-
-        const readinessFill = readinessBar.createDiv('readiness-fill');
-        readinessFill.style.width = `${assessment.migrationReadiness}%`;
-        readinessFill.style.height = '100%';
-        readinessFill.style.backgroundColor = assessment.migrationReadiness >= 80 ? 'var(--text-success)' : assessment.migrationReadiness >= 60 ? 'var(--text-warning)' : 'var(--text-error)';
-
-        readinessSection.createEl('p', {
-            text: `Migration Readiness: ${assessment.migrationReadiness}%`,
-            cls: 'readiness-text'
-        });
-
-        // Recommendations
-        const recSection = modal.contentEl.createDiv('recommendations');
-        recSection.createEl('h3', { text: 'Recommendations' });
-
-        const recList = recSection.createEl('ul');
-        assessment.recommendations.forEach(rec => {
-            recList.createEl('li', { text: rec });
-        });
-
-        const button = modal.contentEl.createEl('button', {
-            text: 'Close',
-            cls: 'mod-cta'
-        });
-        button.onclick = () => modal.close();
-        button.style.marginTop = '20px';
-
-        modal.open();
-    }
-
-    // AI-Powered Features Methods
-    openAIAssistant(): void {
-        new AIAssistantModal(
-            this.app,
-            this.aiEngine,
-            this.settings.aiSettings,
-            (newSettings) => {
-                this.settings.aiSettings = newSettings;
-                this.saveSettings();
-
-                // Reinitialize AI engine with new settings
-                this._aiEngine = new AIAnalyzeEngine(this.app, newSettings);
-                new Notice('AI settings saved');
-            }
-        ).open();
-    }
-
-    openAIPasswordGenerator(context: any = {}): void {
-        new AIPasswordGeneratorModal(this.app, this.aiEngine, context).open();
-    }
-
-    async analyzeCurrentNoteWithAI(): Promise<void> {
-        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!activeView) {
-            new Notice('No active note to analyze');
-            return;
-        }
-
-        try {
-            const content = activeView.editor.getValue();
-            const filePath = activeView.file?.path;
-
-            new Notice('AI analyzing content...', 0);
-            const analysis = await this.aiEngine.analyzeContent(content, filePath);
-
-            this.showContentAnalysisResults(analysis);
-
-            // Learn from this analysis
-            await this.aiEngine.learnFromBehavior('encrypt', {
-                contentLength: content.length,
-                timeOfDay: Date.now()
-            });
-
-        } catch (error) {
-            new Notice('AI analysis failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
-        }
-    }
-
-    async getAISecurityInsights(): Promise<void> {
-        try {
-            const insights = await this.aiEngine.getSecurityRecommendations({
-                recentActivity: [], // Would gather from recent operations
-                contentAnalysis: undefined,
-                passwordAnalysis: undefined,
-                userPatterns: [] // Would load from stored patterns
-            });
-
-            this.showAIInsightsModal(insights);
-        } catch (error) {
-            new Notice('Failed to get AI insights: ' + (error instanceof Error ? error.message : 'Unknown error'));
-        }
-    }
-
-    private showContentAnalysisResults(analysis: any): void {
-        const modal = new Modal(this.app);
-        modal.contentEl.createEl('h2', { text: 'AI Content Analysis' });
-
-        // Sensitivity assessment
-        const sensitivitySection = modal.contentEl.createDiv('sensitivity-section');
-        const sensitivityBadge = sensitivitySection.createDiv('sensitivity-badge');
-        sensitivityBadge.style.padding = '8px 16px';
-        sensitivityBadge.style.borderRadius = '20px';
-        sensitivityBadge.style.display = 'inline-block';
-        sensitivityBadge.style.fontWeight = 'bold';
-        sensitivityBadge.style.marginBottom = '16px';
-
-        const colors = {
-            'low': 'var(--text-success)',
-            'medium': 'var(--text-warning)',
-            'high': 'var(--text-error)',
-            'critical': '#8B0000'
-        };
-
-        sensitivityBadge.style.backgroundColor = colors[analysis.sensitivity as keyof typeof colors];
-        sensitivityBadge.style.color = 'white';
-        sensitivityBadge.textContent = `${analysis.sensitivity.toUpperCase()} (${analysis.confidence}% confidence)`;
-
-        // Recommendations
-        if (analysis.recommendations.length > 0) {
-            const recSection = modal.contentEl.createDiv('recommendations');
-            recSection.createEl('h3', { text: 'AI Recommendations' });
-
-            const recList = recSection.createEl('ul');
-            analysis.recommendations.forEach((rec: string) => {
-                recList.createEl('li', { text: rec });
-            });
-        }
-
-        // Suggest encryption if needed
-        if (analysis.shouldEncrypt) {
-            const actionSection = modal.contentEl.createDiv('action-suggestion');
-            actionSection.style.padding = '16px';
-            actionSection.style.border = '1px solid var(--interactive-accent)';
-            actionSection.style.borderRadius = '8px';
-            actionSection.style.marginTop = '16px';
-
-            actionSection.createEl('p', {
-                text: '🔒 AI recommends encrypting this note for security.',
-                cls: 'encryption-recommendation'
-            }).style.fontWeight = 'bold';
-
-            const encryptButton = actionSection.createEl('button', {
-                text: 'Encrypt Now',
-                cls: 'mod-cta'
-            });
-            encryptButton.onclick = () => {
-                modal.close();
-                this.handleEncryptDecrypt(); // Call existing encrypt method
-            };
-        }
-
-        const button = modal.contentEl.createEl('button', {
-            text: 'Close',
-            cls: 'mod-cta'
-        });
-        button.onclick = () => modal.close();
-        button.style.marginTop = '20px';
-
-        modal.open();
-    }
-
-    private showAIInsightsModal(insights: string[]): void {
-        const modal = new Modal(this.app);
-        modal.contentEl.createEl('h2', { text: 'AI Security Insights' });
-
-        const insightsSection = modal.contentEl.createDiv('insights-section');
-        insightsSection.createEl('h3', { text: 'Personalized Security Recommendations' });
-
-        if (insights.length === 0) {
-            insightsSection.createEl('p', {
-                text: 'AI is still learning your patterns. Continue using the plugin to receive personalized insights.',
-                cls: 'learning-status'
-            });
-        } else {
-            const insightsList = insightsSection.createEl('ul');
-            insights.forEach(insight => {
-                insightsList.createEl('li', { text: insight });
-            });
-        }
-
-        const button = modal.contentEl.createEl('button', {
-            text: 'Close',
-            cls: 'mod-cta'
-        });
-        button.onclick = () => modal.close();
-        button.style.marginTop = '20px';
-
-        modal.open();
-    }
-
-    /**
-     * Quick batch encrypt selected files
-     */
-    async quickBatchEncrypt(files?: TFile[]): Promise<void> {
-        if (!files) {
-            // If no files provided, show selection modal
-            this.openBatchEncryptModal();
-            return;
-        }
-
-        new BatchOperationModal(this.app, 'encrypt', files).open();
-    }
-
-    /**
-     * Quick batch decrypt selected files
-     */
-    async quickBatchDecrypt(files?: TFile[]): Promise<void> {
-        if (!files) {
-            // If no files provided, show selection modal
-            this.openBatchDecryptModal();
-            return;
-        }
-
-        new BatchOperationModal(this.app, 'decrypt', files).open();
-    }
-
-    async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    }
-
-    async saveSettings() {
-        await this.saveData(this.settings);
-    }
+    return bytes.buffer;
 }
 
-// Enhanced password modal with strength indicator and validation
-class EnhancedPasswordModal extends Modal {
-    password: string = '';
-    onSubmit: (password: string) => void;
-    isEncrypting: boolean;
-    settings: NoteEncryptorSettings;
-    strengthEl: HTMLElement | null = null;
-    confirmInput: HTMLInputElement | null = null;
-    plugin?: NoteEncryptorPlugin;
+async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(password),
+        'PBKDF2',
+        false,
+        ['deriveBits', 'deriveKey']
+    );
 
-    constructor(app: App, isEncrypting: boolean, settings: NoteEncryptorSettings, onSubmit: (password: string) => void, plugin?: NoteEncryptorPlugin) {
+    return crypto.subtle.deriveKey(
+        {
+            name: 'PBKDF2',
+            salt: salt,
+            iterations: CRYPTO_CONSTANTS.PBKDF2_ITERATIONS,
+            hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: CRYPTO_CONSTANTS.ALGORITHM, length: CRYPTO_CONSTANTS.KEY_LENGTH },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+async function encryptContent(content: string, password: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(CRYPTO_CONSTANTS.SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(CRYPTO_CONSTANTS.IV_LENGTH));
+    const key = await deriveKey(password, salt);
+
+    const encrypted = await crypto.subtle.encrypt(
+        { name: CRYPTO_CONSTANTS.ALGORITHM, iv: iv },
+        key,
+        encoder.encode(content)
+    );
+
+    // Combine salt + iv + encrypted data
+    const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+    const base64 = arrayBufferToBase64(combined.buffer);
+    return `${CRYPTO_CONSTANTS.ENCRYPTION_HEADER_START}\n${base64}\n${CRYPTO_CONSTANTS.ENCRYPTION_HEADER_END}`;
+}
+
+async function decryptContent(encryptedContent: string, password: string): Promise<string> {
+    // Extract base64 data
+    const match = encryptedContent.match(
+        new RegExp(`${escapeRegex(CRYPTO_CONSTANTS.ENCRYPTION_HEADER_START)}\\n([\\s\\S]+?)\\n${escapeRegex(CRYPTO_CONSTANTS.ENCRYPTION_HEADER_END)}`)
+    );
+    
+    if (!match) {
+        throw new Error('Invalid encrypted content format');
+    }
+
+    const combined = new Uint8Array(base64ToArrayBuffer(match[1]));
+    const salt = combined.slice(0, CRYPTO_CONSTANTS.SALT_LENGTH);
+    const iv = combined.slice(CRYPTO_CONSTANTS.SALT_LENGTH, CRYPTO_CONSTANTS.SALT_LENGTH + CRYPTO_CONSTANTS.IV_LENGTH);
+    const data = combined.slice(CRYPTO_CONSTANTS.SALT_LENGTH + CRYPTO_CONSTANTS.IV_LENGTH);
+
+    const key = await deriveKey(password, salt);
+    
+    const decrypted = await crypto.subtle.decrypt(
+        { name: CRYPTO_CONSTANTS.ALGORITHM, iv: iv },
+        key,
+        data
+    );
+
+    return new TextDecoder().decode(decrypted);
+}
+
+function isEncrypted(content: string): boolean {
+    return content.includes(CRYPTO_CONSTANTS.ENCRYPTION_HEADER_START) &&
+           content.includes(CRYPTO_CONSTANTS.ENCRYPTION_HEADER_END);
+}
+
+function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function calculatePasswordStrength(password: string): PasswordStrength {
+    let score = 0;
+    
+    // Length scoring
+    if (password.length >= 8) { score += 20; }
+    if (password.length >= 12) { score += 15; }
+    if (password.length >= 16) { score += 15; }
+    
+    // Character variety
+    if (/[a-z]/.test(password)) { score += 10; }
+    if (/[A-Z]/.test(password)) { score += 15; }
+    if (/[0-9]/.test(password)) { score += 15; }
+    if (/[^a-zA-Z0-9]/.test(password)) { score += 20; }
+    
+    // Bonus for mixing
+    const types = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter(r => r.test(password)).length;
+    if (types >= 3) { score += 10; }
+    if (types === 4) { score += 10; }
+    
+    const percentage = Math.min(100, score);
+    
+    let text: string;
+    let color: string;
+    
+    if (percentage < 30) {
+        text = 'Weak';
+        color = '#dc3545';
+    } else if (percentage < 60) {
+        text = 'Fair';
+        color = '#ffc107';
+    } else if (percentage < 80) {
+        text = 'Good';
+        color = '#28a745';
+    } else {
+        text = 'Strong';
+        color = '#20c997';
+    }
+    
+    return { score, percentage, text, color };
+}
+
+// ============================================================================
+// Password Modal
+// ============================================================================
+
+class PasswordModal extends Modal {
+    private password: string = '';
+    private confirmPassword: string = '';
+    private onSubmit: (password: string) => void;
+    private isEncrypting: boolean;
+    private showStrength: boolean;
+    private minLength: number;
+
+    constructor(
+        app: App, 
+        onSubmit: (password: string) => void, 
+        isEncrypting: boolean,
+        showStrength: boolean = true,
+        minLength: number = 8
+    ) {
         super(app);
         this.onSubmit = onSubmit;
         this.isEncrypting = isEncrypting;
-        this.settings = settings;
-        this.plugin = plugin;
+        this.showStrength = showStrength;
+        this.minLength = minLength;
     }
 
     onOpen() {
         const { contentEl } = this;
         contentEl.empty();
-        contentEl.addClass('password-modal');
+        contentEl.addClass('note-encryptor-modal');
 
-        contentEl.createEl('h2', { text: this.isEncrypting ? 'Encrypt Note' : 'Decrypt Note' });
-
-        new Setting(contentEl)
-            .setName('Password')
-            .setDesc(this.isEncrypting ? 'Enter a strong password to encrypt the note' : 'Enter the password to decrypt the note')
-            .addText(text => text
-                .setPlaceholder('Enter password')
-                .onChange(value => {
-                    this.password = value;
-                    this.updatePasswordStrength(value);
-                })
-                .inputEl.setAttribute('type', 'password'));
-
-        // Add password strength indicator for encryption
-        if (this.isEncrypting && this.settings.showPasswordStrength) {
-            this.strengthEl = contentEl.createDiv('password-strength-indicator');
-            this.updatePasswordStrength('');
-        }
-
-        if (this.isEncrypting) {
-            new Setting(contentEl)
-                .setName('Confirm Password')
-                .setDesc('Re-enter your password to confirm')
-                .addText(text => {
-                    text.setPlaceholder('Confirm password')
-                        .inputEl.setAttribute('type', 'password');
-                    this.confirmInput = text.inputEl;
-                });
-
-            this.createPasswordRequirements(contentEl);
-
-            new Setting(contentEl)
-                .addButton(btn => btn
-                    .setButtonText('Encrypt')
-                    .setCta()
-                    .onClick(async () => {
-                        await this.handleEncryptSubmit();
-                    }));
-        } else {
-            new Setting(contentEl)
-                .addButton(btn => btn
-                    .setButtonText('Decrypt')
-                    .setCta()
-                    .onClick(async () => {
-                        await this.handleDecryptSubmit();
-                    }));
-        }
-
-        // Add some basic styling
-        this.addModalStyles();
-    }
-
-    private createPasswordRequirements(containerEl: HTMLElement): void {
-        const requirementsEl = containerEl.createDiv('password-requirements');
-        requirementsEl.createEl('h4', { text: 'Password Requirements:' });
-
-        const requirements = [
-            `At least ${this.settings.passwordMinLength} characters`,
-            this.settings.requireStrongPasswords ? 'Contains uppercase, lowercase, and numbers' : null,
-            'Maximum 1024 characters'
-        ].filter(Boolean);
-
-        requirements.forEach(req => {
-            if (req) {
-                requirementsEl.createEl('div', {
-                    text: `• ${req}`,
-                    cls: 'requirement-item'
-                });
-            }
+        contentEl.createEl('h2', { 
+            text: this.isEncrypting ? '🔒 Encrypt Note' : '🔓 Decrypt Note' 
         });
-    }
 
-    private updatePasswordStrength(password: string): void {
-        if (!this.strengthEl || !this.plugin) return;
+        // Password input
+        const passwordContainer = contentEl.createDiv('password-container');
+        passwordContainer.createEl('label', { text: 'Password' });
+        
+        const passwordInput = passwordContainer.createEl('input', {
+            type: 'password',
+            placeholder: 'Enter password'
+        });
+        passwordInput.addClass('password-input');
 
-        const strength = this.plugin['calculatePasswordStrength'](password);
+        // Strength indicator (for encryption only)
+        let strengthBar: HTMLElement | null = null;
+        let strengthText: HTMLElement | null = null;
+        
+        if (this.isEncrypting && this.showStrength) {
+            const strengthContainer = contentEl.createDiv('strength-container');
+            strengthBar = strengthContainer.createDiv('strength-bar');
+            strengthText = strengthContainer.createDiv('strength-text');
+            strengthText.textContent = 'Enter a password';
+        }
 
-        this.strengthEl.innerHTML = `
-            <div class="strength-container">
-                <div class="strength-label">Password Strength:</div>
-                <div class="strength-bar">
-                    <div class="strength-fill" style="width: ${strength.percentage}%; background-color: ${strength.color}"></div>
-                </div>
-                <div class="strength-text" style="color: ${strength.color}">${strength.text}</div>
-            </div>
-        `;
-    }
+        // Confirm password (for encryption only)
+        let confirmInput: HTMLInputElement | null = null;
+        if (this.isEncrypting) {
+            const confirmContainer = contentEl.createDiv('password-container');
+            confirmContainer.createEl('label', { text: 'Confirm Password' });
+            confirmInput = confirmContainer.createEl('input', {
+                type: 'password',
+                placeholder: 'Confirm password'
+            });
+            confirmInput.addClass('password-input');
+        }
 
-    private async handleEncryptSubmit(): Promise<void> {
-        try {
-            if (!this.password) {
-                new Notice('Please enter a password');
+        // Error message
+        const errorEl = contentEl.createDiv('error-message');
+        errorEl.style.display = 'none';
+
+        // Buttons
+        const buttonContainer = contentEl.createDiv('button-container');
+        
+        const cancelBtn = buttonContainer.createEl('button', { text: 'Cancel' });
+        cancelBtn.onclick = () => this.close();
+
+        const submitBtn = buttonContainer.createEl('button', { 
+            text: this.isEncrypting ? 'Encrypt' : 'Decrypt' 
+        });
+        submitBtn.addClass('mod-cta');
+
+        // Event handlers
+        passwordInput.oninput = () => {
+            this.password = passwordInput.value;
+            if (strengthBar && strengthText && this.showStrength) {
+                const strength = calculatePasswordStrength(this.password);
+                strengthBar.style.width = `${strength.percentage}%`;
+                strengthBar.style.backgroundColor = strength.color;
+                strengthText.textContent = this.password ? strength.text : 'Enter a password';
+                strengthText.style.color = strength.color;
+            }
+        };
+
+        if (confirmInput) {
+            confirmInput.oninput = () => {
+                this.confirmPassword = confirmInput!.value;
+            };
+        }
+
+        submitBtn.onclick = () => {
+            errorEl.style.display = 'none';
+
+            if (this.password.length < this.minLength) {
+                errorEl.textContent = `Password must be at least ${this.minLength} characters`;
+                errorEl.style.display = 'block';
                 return;
             }
 
-            if (!this.confirmInput) {
-                throw new Error('Confirm input not found');
-            }
-
-            if (this.password !== this.confirmInput.value) {
-                new Notice('Passwords do not match');
+            if (this.isEncrypting && this.password !== this.confirmPassword) {
+                errorEl.textContent = 'Passwords do not match';
+                errorEl.style.display = 'block';
                 return;
             }
 
-            // Validate password
-            if (this.plugin) {
-                const validation = this.plugin['validatePassword'](this.password);
-                if (!validation.valid) {
-                    new Notice(validation.reason || 'Invalid password');
-                    return;
-                }
-            }
-
-            this.close();
             this.onSubmit(this.password);
-        } catch (error) {
-            new Notice('Error validating password: ' + (error instanceof Error ? error.message : String(error)));
+            this.close();
+        };
+
+        // Enter key support
+        const handleEnter = (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+                submitBtn.click();
+            }
+        };
+        passwordInput.onkeydown = handleEnter;
+        if (confirmInput) {
+            confirmInput.onkeydown = handleEnter;
         }
+
+        passwordInput.focus();
+        this.addStyles();
     }
 
-    private async handleDecryptSubmit(): Promise<void> {
-        if (!this.password) {
-            new Notice('Please enter a password');
-            return;
-        }
-
-        this.close();
-        this.onSubmit(this.password);
+    onClose() {
+        // Clear password from memory
+        this.password = '';
+        this.confirmPassword = '';
+        this.contentEl.empty();
     }
 
-    private addModalStyles(): void {
+    private addStyles() {
+        const styleId = 'note-encryptor-modal-styles';
+        if (document.getElementById(styleId)) { return; }
+
         const style = document.createElement('style');
+        style.id = styleId;
         style.textContent = `
-            .password-modal .password-strength-indicator {
-                margin: 16px 0;
-                padding: 12px;
-                border: 1px solid var(--background-modifier-border);
-                border-radius: 6px;
-                background-color: var(--background-secondary);
+            .note-encryptor-modal {
+                padding: 20px;
             }
-
-            .password-modal .strength-container {
-                display: flex;
-                align-items: center;
-                gap: 12px;
+            .note-encryptor-modal h2 {
+                margin-bottom: 20px;
             }
-
-            .password-modal .strength-label {
-                min-width: 120px;
-                font-size: 14px;
+            .password-container {
+                margin-bottom: 16px;
+            }
+            .password-container label {
+                display: block;
+                margin-bottom: 6px;
                 font-weight: 500;
             }
-
-            .password-modal .strength-bar {
-                flex: 1;
-                height: 8px;
-                background-color: var(--background-modifier-border);
+            .password-input {
+                width: 100%;
+                padding: 10px;
+                border: 1px solid var(--background-modifier-border);
                 border-radius: 4px;
-                overflow: hidden;
-            }
-
-            .password-modal .strength-fill {
-                height: 100%;
-                transition: width 0.3s ease, background-color 0.3s ease;
-                border-radius: 4px;
-            }
-
-            .password-modal .strength-text {
-                min-width: 80px;
-                font-size: 12px;
-                font-weight: 600;
-                text-align: right;
-            }
-
-            .password-modal .password-requirements {
-                margin: 16px 0;
-                padding: 12px;
-                background-color: var(--background-secondary-alt);
-                border-radius: 6px;
-                border-left: 3px solid var(--interactive-accent);
-            }
-
-            .password-modal .password-requirements h4 {
-                margin: 0 0 8px 0;
-                font-size: 14px;
+                background: var(--background-primary);
                 color: var(--text-normal);
+                font-size: 14px;
             }
-
-            .password-modal .requirement-item {
+            .strength-container {
+                margin-bottom: 16px;
+            }
+            .strength-bar {
+                height: 4px;
+                width: 0;
+                background: #dc3545;
+                border-radius: 2px;
+                transition: all 0.3s ease;
+                margin-bottom: 4px;
+            }
+            .strength-text {
                 font-size: 12px;
                 color: var(--text-muted);
-                margin: 4px 0;
             }
-
-            .modal-button-container {
+            .error-message {
+                color: #dc3545;
+                font-size: 13px;
+                margin-bottom: 16px;
+            }
+            .button-container {
                 display: flex;
-                gap: 8px;
                 justify-content: flex-end;
-                margin-top: 16px;
-            }
-
-            .modal-button-container button {
-                padding: 8px 16px;
-                border-radius: 4px;
-                border: 1px solid var(--background-modifier-border);
-                background-color: var(--interactive-normal);
-                color: var(--text-normal);
-                cursor: pointer;
-            }
-
-            .modal-button-container button:hover {
-                background-color: var(--interactive-hover);
-            }
-
-            .modal-button-container button.mod-cta {
-                background-color: var(--interactive-accent);
-                color: var(--text-on-accent);
-                border-color: var(--interactive-accent);
+                gap: 10px;
             }
         `;
         document.head.appendChild(style);
     }
+}
 
-    onClose() {
-        // Security: Clear password from memory
-        this.password = '';
-        if (this.confirmInput) {
-            this.confirmInput.value = '';
-        }
-        
+// ============================================================================
+// Folder Selection Modal
+// ============================================================================
+
+class FolderSelectionModal extends Modal {
+    private onChoose: (folder: TFolder) => void;
+
+    constructor(app: App, onChoose: (folder: TFolder) => void) {
+        super(app);
+        this.onChoose = onChoose;
+    }
+
+    onOpen() {
         const { contentEl } = this;
         contentEl.empty();
+        contentEl.addClass('folder-selection-modal');
+
+        contentEl.createEl('h2', { text: 'Select Folder' });
+
+        const folderList = contentEl.createDiv({ cls: 'folder-list' });
+        folderList.style.maxHeight = '400px';
+        folderList.style.overflowY = 'auto';
+
+        const folders = this.getAllFolders();
+        
+        if (folders.length === 0) {
+            folderList.createEl('p', { text: 'No folders found in vault' });
+            return;
+        }
+
+        for (const folder of folders) {
+            const folderItem = folderList.createDiv({ cls: 'folder-item' });
+            folderItem.style.padding = '8px 12px';
+            folderItem.style.cursor = 'pointer';
+            folderItem.style.borderRadius = '4px';
+            
+            folderItem.createSpan({ text: '📁 ' });
+            folderItem.createSpan({ text: folder.path || '/' });
+            
+            folderItem.addEventListener('mouseenter', () => {
+                folderItem.style.backgroundColor = 'var(--background-modifier-hover)';
+            });
+            folderItem.addEventListener('mouseleave', () => {
+                folderItem.style.backgroundColor = '';
+            });
+            folderItem.addEventListener('click', () => {
+                this.close();
+                this.onChoose(folder);
+            });
+        }
+    }
+
+    private getAllFolders(): TFolder[] {
+        const folders: TFolder[] = [];
+        const rootFolder = this.app.vault.getRoot();
+        
+        const collectFolders = (folder: TFolder) => {
+            folders.push(folder);
+            for (const child of folder.children) {
+                if (child instanceof TFolder) {
+                    collectFolders(child);
+                }
+            }
+        };
+        
+        collectFolders(rootFolder);
+        return folders.sort((a, b) => a.path.localeCompare(b.path));
+    }
+
+    onClose() {
+        this.contentEl.empty();
     }
 }
+
+// ============================================================================
+// Settings Tab
+// ============================================================================
 
 class NoteEncryptorSettingTab extends PluginSettingTab {
     plugin: NoteEncryptorPlugin;
@@ -1462,12 +485,10 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
 
         containerEl.createEl('h2', { text: 'Note Encryptor Settings' });
 
-        // File Naming Settings
-        containerEl.createEl('h3', { text: 'File Naming' });
-
+        // Visual Settings
         new Setting(containerEl)
             .setName('Encrypted note prefix')
-            .setDesc('Prefix to add to encrypted note filenames (e.g., 🔒 or [ENCRYPTED])')
+            .setDesc('Prefix added to encrypted note filenames')
             .addText(text => text
                 .setPlaceholder('🔒 ')
                 .setValue(this.plugin.settings.encryptedNotePrefix)
@@ -1478,7 +499,7 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Encrypted note suffix')
-            .setDesc('Suffix to add to encrypted note filenames (optional)')
+            .setDesc('Suffix added to encrypted note filenames (optional)')
             .addText(text => text
                 .setPlaceholder('')
                 .setValue(this.plugin.settings.encryptedNoteSuffix)
@@ -1488,23 +509,13 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                 }));
 
         // Security Settings
-        containerEl.createEl('h3', { text: 'Security Settings' });
-
-        new Setting(containerEl)
-            .setName('Require strong passwords')
-            .setDesc('Enforce password complexity requirements (uppercase, lowercase, and numbers)')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.requireStrongPasswords)
-                .onChange(async (value) => {
-                    this.plugin.settings.requireStrongPasswords = value;
-                    await this.plugin.saveSettings();
-                }));
+        containerEl.createEl('h3', { text: 'Security' });
 
         new Setting(containerEl)
             .setName('Minimum password length')
-            .setDesc('Minimum number of characters required for passwords')
+            .setDesc('Minimum characters required for passwords')
             .addSlider(slider => slider
-                .setLimits(4, 32, 1)
+                .setLimits(6, 24, 1)
                 .setValue(this.plugin.settings.passwordMinLength)
                 .setDynamicTooltip()
                 .onChange(async (value) => {
@@ -1513,23 +524,8 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Maximum file size')
-            .setDesc('Maximum file size for encryption (in MB)')
-            .addSlider(slider => slider
-                .setLimits(1, 50, 1)
-                .setValue(this.plugin.settings.maxFileSize)
-                .setDynamicTooltip()
-                .onChange(async (value) => {
-                    this.plugin.settings.maxFileSize = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        // User Experience Settings
-        containerEl.createEl('h3', { text: 'User Experience' });
-
-        new Setting(containerEl)
-            .setName('Show password strength indicator')
-            .setDesc('Display a visual indicator showing password strength during encryption')
+            .setName('Show password strength')
+            .setDesc('Display password strength indicator when encrypting')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.showPasswordStrength)
                 .onChange(async (value) => {
@@ -1537,477 +533,519 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        new Setting(containerEl)
-            .setName('Confirm before encryption')
-            .setDesc('Show a confirmation dialog before encrypting notes')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.confirmOnEncrypt)
-                .onChange(async (value) => {
-                    this.plugin.settings.confirmOnEncrypt = value;
-                    await this.plugin.saveSettings();
-                }));
+        // Security Info
+        containerEl.createEl('h3', { text: 'About' });
+        
+        const infoEl = containerEl.createDiv('security-info');
+        infoEl.innerHTML = `
+            <p><strong>Encryption:</strong> AES-256-GCM with PBKDF2 key derivation</p>
+            <p><strong>Iterations:</strong> 310,000 (OWASP recommended)</p>
+            <p><strong>Security:</strong> Your password is never stored. Each encryption uses a unique random salt and IV.</p>
+            <p style="color: var(--text-warning); margin-top: 12px;">
+                ⚠️ <strong>Important:</strong> There is no way to recover an encrypted note without the correct password.
+            </p>
+        `;
+        infoEl.style.cssText = 'padding: 12px; background: var(--background-secondary); border-radius: 6px; font-size: 13px; line-height: 1.6;';
+    }
+}
 
-        // Advanced Features Settings
-        containerEl.createEl('h3', { text: 'Advanced Features (v2.1.0)' });
+// ============================================================================
+// Main Plugin
+// ============================================================================
 
-        new Setting(containerEl)
-            .setName('Enable WebAssembly acceleration')
-            .setDesc('Use WebAssembly for faster encryption/decryption (300-500% improvement for large files)')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableWebAssembly)
-                .onChange(async (value) => {
-                    this.plugin.settings.enableWebAssembly = value;
-                    await this.plugin.saveSettings();
-                }));
+export default class NoteEncryptorPlugin extends Plugin {
+    settings: NoteEncryptorSettings = DEFAULT_SETTINGS;
 
-        const capabilities = enhancedEncryptionService.getSystemCapabilities();
-        new Setting(containerEl)
-            .setName('WebAssembly Status')
-            .setDesc(`Supported: ${capabilities.wasmSupported}, Initialized: ${capabilities.wasmInitialized}`)
-            .addText(text => text
-                .setPlaceholder(capabilities.wasmInitialized ? 'Ready' : 'Not Available')
-                .setValue(capabilities.wasmInitialized ? 'Ready' : 'Not Available')
-                .setDisabled(true));
+    async onload() {
+        await this.loadSettings();
 
-        new Setting(containerEl)
-            .setName('Performance mode')
-            .setDesc('Optimize for speed over memory usage')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.performanceMode)
-                .onChange(async (value) => {
-                    this.plugin.settings.performanceMode = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Show performance metrics')
-            .setDesc('Display encryption/decryption timing and performance data')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.showPerformanceMetrics)
-                .onChange(async (value) => {
-                    this.plugin.settings.showPerformanceMetrics = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Enable advanced features')
-            .setDesc('Enable experimental and advanced encryption features')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableAdvancedFeatures)
-                .onChange(async (value) => {
-                    this.plugin.settings.enableAdvancedFeatures = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        if (this.plugin.settings.showPerformanceMetrics) {
-            const metrics = enhancedEncryptionService.getMetrics();
-            const metricsEl = containerEl.createDiv('performance-metrics');
-            metricsEl.createEl('h4', { text: 'Performance Metrics' });
-
-            const metricsInfo = metricsEl.createDiv('metrics-info');
-            metricsInfo.createEl('div', { text: `Last Encryption: ${metrics.encryptionMetrics.lastEncryption?.toFixed(2) || 'N/A'}ms` });
-            metricsInfo.createEl('div', { text: `WASM Used: ${metrics.encryptionMetrics.wasmUsed ? 'Yes' : 'No'}` });
-
-            // Add benchmark button
-            new Setting(containerEl)
-                .setName('Run Performance Benchmark')
-                .setDesc('Test WASM vs JavaScript performance')
-                .addButton(button => button
-                    .setButtonText('Run Benchmark')
-                    .onClick(async () => {
-                        const { buttonEl } = button;
-                        buttonEl.textContent = 'Running...';
-                        buttonEl.disabled = true;
-
-                        try {
-                            const benchmark = await enhancedEncryptionService.benchmarkPerformance(1024 * 1024); // 1MB
-                            new Notice(`Benchmark complete: ${benchmark.improvement.toFixed(1)}% improvement with WASM`);
-                        } catch (error) {
-                            new Notice('Benchmark failed: ' + (error instanceof Error ? error.message : String(error)));
-                        } finally {
-                            buttonEl.textContent = 'Run Benchmark';
-                            buttonEl.disabled = false;
-                        }
-                    }));
-        }
-
-        // Hardware Security Settings
-        containerEl.createEl('h3', { text: 'Hardware Security' });
-
-        if (HardwareSecurityManager.isSupported()) {
-            containerEl.createEl('p', {
-                text: 'Your device supports hardware security keys (WebAuthn/FIDO2) for enhanced authentication.',
-                cls: 'support-info'
-            });
-
-            new Setting(containerEl)
-                .setName('Enable hardware security')
-                .setDesc('Use hardware security keys for enhanced authentication of encrypted notes')
-                .addToggle(toggle => toggle
-                    .setValue(this.plugin.settings.hardwareSecurity?.enabled ?? false)
-                    .onChange(async (value) => {
-                        this.plugin.settings.hardwareSecurity.enabled = value;
-                        await this.plugin.saveSettings();
-                        this.display(); // Refresh to show/hide additional options
-                    }));
-
-            if (this.plugin.settings.hardwareSecurity?.enabled) {
-                // Hardware security setup button
-                const hardwareSection = containerEl.createDiv('hardware-security-section');
-
-                new Setting(hardwareSection)
-                    .setName('Setup security keys')
-                    .setDesc('Register and manage your hardware security keys')
-                    .addButton(button => button
-                        .setButtonText('Configure Hardware Security')
-                        .setCta()
-                        .onClick(() => {
-                            this.plugin.openHardwareSecuritySetup();
-                        }));
-
-                // Show current status
-                if (this.plugin.hardwareSecurityManager) {
-                    const statusDisplay = new SecurityStatusDisplay(
-                        hardwareSection.createDiv('status-container'),
-                        this.plugin.hardwareSecurityManager
-                    );
-                    statusDisplay.update();
+        // Right-click context menu for files
+        this.registerEvent(
+            this.app.workspace.on('file-menu', (menu, file) => {
+                if (file instanceof TFile && file.extension === 'md') {
+                    menu.addItem((item) => {
+                        item.setTitle('🔐 Encrypt note')
+                            .setIcon('lock')
+                            .onClick(async () => {
+                                const content = await this.app.vault.read(file);
+                                if (isEncrypted(content)) {
+                                    new Notice('Note is already encrypted');
+                                    return;
+                                }
+                                this.encryptFile(file);
+                            });
+                    });
+                    
+                    menu.addItem((item) => {
+                        item.setTitle('🔓 Decrypt note')
+                            .setIcon('unlock')
+                            .onClick(async () => {
+                                const content = await this.app.vault.read(file);
+                                if (!isEncrypted(content)) {
+                                    new Notice('Note is not encrypted');
+                                    return;
+                                }
+                                this.decryptFile(file);
+                            });
+                    });
                 }
+                
+                if (file instanceof TFolder) {
+                    menu.addItem((item) => {
+                        item.setTitle('🔐 Encrypt folder')
+                            .setIcon('lock')
+                            .onClick(() => this.encryptSpecificDirectory(file));
+                    });
+                    
+                    menu.addItem((item) => {
+                        item.setTitle('🔓 Decrypt folder')
+                            .setIcon('unlock')
+                            .onClick(() => this.decryptSpecificDirectory(file));
+                    });
+                }
+            })
+        );
+
+        // Commands
+        this.addCommand({
+            id: 'encrypt-note',
+            name: 'Encrypt current note',
+            checkCallback: (checking: boolean) => {
+                const file = this.app.workspace.getActiveFile();
+                if (file) {
+                    if (!checking) {
+                        this.encryptCurrentNote();
+                    }
+                    return true;
+                }
+                return false;
             }
-        } else {
-            containerEl.createEl('p', {
-                text: 'Hardware security keys are not supported on this device. Please use a modern browser with WebAuthn support (Chrome, Firefox, Safari, Edge).',
-                cls: 'unsupported-info'
-            });
-        }
+        });
 
-        // Error Recovery Settings
-        containerEl.createEl('h3', { text: 'Error Recovery' });
-
-        const recoveryStatus = containerEl.createDiv('recovery-status');
-        const statusDisplay = new ErrorRecoveryStatusDisplay(recoveryStatus, this.plugin.errorRecovery);
-        statusDisplay.update();
-
-        new Setting(containerEl)
-            .setName('Open error diagnostics')
-            .setDesc('View error statistics, manage recovery settings, and export error reports')
-            .addButton(button => button
-                .setButtonText('Open Diagnostics')
-                .setCta()
-                .onClick(() => {
-                    this.plugin.openErrorRecoveryDiagnostics();
-                }));
-
-        new Setting(containerEl)
-            .setName('Test error recovery')
-            .setDesc('Test the error recovery system with a simulated error')
-            .addButton(button => button
-                .setButtonText('Test System')
-                .onClick(() => {
-                    this.plugin.testErrorRecovery();
-                }));
-
-        // Post-Quantum Cryptography Settings
-        containerEl.createEl('h3', { text: 'Post-Quantum Cryptography' });
-
-        if (PostQuantumCryptoManager.isSupported()) {
-            containerEl.createEl('p', {
-                text: 'Your device supports post-quantum cryptography for future-proofing against quantum computing threats.',
-                cls: 'support-info'
-            });
-
-            // Post-quantum status
-            const pqStatus = containerEl.createDiv('pq-status');
-            const statusDisplay = new PostQuantumStatusDisplay(pqStatus, this.plugin.postQuantumManager);
-            statusDisplay.update();
-
-            // Settings
-            new Setting(containerEl)
-                .setName('Enable post-quantum cryptography')
-                .setDesc('Use quantum-resistant algorithms for enhanced future security')
-                .addToggle(toggle => toggle
-                    .setValue(this.plugin.settings.postQuantum?.enablePostQuantum ?? false)
-                    .onChange(async (value) => {
-                        this.plugin.settings.postQuantum.enablePostQuantum = value;
-                        await this.plugin.saveSettings();
-                        this.display(); // Refresh to show/hide additional options
-                    }));
-
-            if (this.plugin.settings.postQuantum?.enablePostQuantum) {
-                // Post-quantum setup button
-                const pqSection = containerEl.createDiv('post-quantum-section');
-
-                new Setting(pqSection)
-                    .setName('Configure post-quantum settings')
-                    .setDesc('Set up quantum-resistant algorithms and key management')
-                    .addButton(button => button
-                        .setButtonText('Post-Quantum Setup')
-                        .setCta()
-                        .onClick(() => {
-                            this.plugin.openPostQuantumSetup();
-                        }));
-
-                // Quick actions
-                const actionsSection = pqSection.createDiv('quick-actions');
-                actionsSection.createEl('h4', { text: 'Quick Actions' });
-
-                const actionsGrid = actionsSection.createDiv('actions-grid');
-                actionsGrid.style.display = 'grid';
-                actionsGrid.style.gridTemplateColumns = '1fr 1fr';
-                actionsGrid.style.gap = '8px';
-
-                const encryptButton = actionsGrid.createEl('button', {
-                    text: 'Quantum Encrypt Current',
-                    cls: 'mod-cta'
-                });
-                encryptButton.onclick = () => {
-                    this.plugin.encryptWithPostQuantum();
-                };
-
-                const keyGenButton = actionsGrid.createEl('button', {
-                    text: 'Generate PQ Keys',
-                    cls: ''
-                });
-                keyGenButton.onclick = () => {
-                    this.plugin.generatePostQuantumKeyPair();
-                };
-
-                const threatButton = actionsGrid.createEl('button', {
-                    text: 'Threat Assessment',
-                    cls: ''
-                });
-                threatButton.onclick = () => {
-                    this.plugin.showQuantumThreatAssessment();
-                };
-
-                const threatStatus = actionsGrid.createEl('div');
-                threatStatus.textContent = 'Quantum Ready: ' + (
-                    this.plugin.settings.postQuantum.quantumReadiness ? 'Yes' : 'No'
-                );
-                threatStatus.style.textAlign = 'center';
-                threatStatus.style.padding = '8px';
-                threatStatus.style.border = '1px solid var(--background-modifier-border)';
-                threatStatus.style.borderRadius = '4px';
-                threatStatus.style.backgroundColor = this.plugin.settings.postQuantum.quantumReadiness ?
-                    'var(--background-modifier-success)' : 'var(--background-modifier-warning)';
+        this.addCommand({
+            id: 'decrypt-note',
+            name: 'Decrypt current note',
+            checkCallback: (checking: boolean) => {
+                const file = this.app.workspace.getActiveFile();
+                if (file) {
+                    if (!checking) {
+                        this.decryptCurrentNote();
+                    }
+                    return true;
+                }
+                return false;
             }
-        } else {
-            containerEl.createEl('p', {
-                text: 'Post-quantum cryptography requires a modern browser with WebAssembly and BigInt support. Please update your browser to access quantum-resistant encryption features.',
-                cls: 'unsupported-info'
-            });
-        }
-
-        // AI-Powered Features Settings
-        containerEl.createEl('h3', { text: 'AI-Powered Security Features' });
-
-        // AI status and controls
-        const aiStatus = containerEl.createDiv('ai-status');
-        aiStatus.createEl('h4', { text: 'AI Security Assistant Status' });
-
-        const statusText = this.plugin.settings.aiSettings?.enabled ? '🟢 AI features enabled' : '🔴 AI features disabled';
-        aiStatus.createEl('p', {
-            text: statusText,
-            cls: this.plugin.settings.aiSettings?.enabled ? 'ai-status-enabled' : 'ai-status-disabled'
         });
 
-        // AI Assistant button
-        new Setting(containerEl)
-            .setName('Open AI Security Assistant')
-            .setDesc('Configure AI-powered security features and analysis tools')
-            .addButton(button => button
-                .setButtonText('AI Assistant')
-                .setCta()
-                .onClick(() => {
-                    this.plugin.openAIAssistant();
-                }));
-
-        // AI Password Generator
-        new Setting(containerEl)
-            .setName('AI Password Generator')
-            .setDesc('Generate intelligent passwords based on content analysis')
-            .addButton(button => button
-                .setButtonText('Generate AI Password')
-                .onClick(() => {
-                    this.plugin.openAIPasswordGenerator();
-                }));
-
-        // Content Analysis
-        new Setting(containerEl)
-            .setName('Analyze Current Note')
-            .setDesc('Use AI to analyze the current note for sensitive information')
-            .addButton(button => button
-                .setButtonText('Analyze with AI')
-                .onClick(() => {
-                    this.plugin.analyzeCurrentNoteWithAI();
-                }));
-
-        // Privacy and Learning settings
-        if (this.plugin.settings.aiSettings?.enabled) {
-            const privacySection = containerEl.createDiv('ai-privacy-settings');
-            privacySection.createEl('h4', { text: 'Privacy & Learning Settings' });
-
-            new Setting(containerEl)
-                .setName('Privacy mode')
-                .setDesc('Disable all AI analysis for maximum privacy')
-                .addToggle((toggle: any) => toggle
-                    .setValue(this.plugin.settings.aiSettings?.privacyMode ?? false)
-                    .onChange(async (value: any) => {
-                        this.plugin.settings.aiSettings.privacyMode = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName('Learning mode')
-                .setDesc('Allow AI to learn from your security patterns for better recommendations')
-                .addToggle((toggle: any) => toggle
-                    .setValue(this.plugin.settings.aiSettings?.learningMode ?? true)
-                    .onChange(async (value: any) => {
-                        this.plugin.settings.aiSettings.learningMode = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName('Breach protection')
-                .setDesc('Check passwords against known data breaches')
-                .addToggle((toggle: any) => toggle
-                    .setValue(this.plugin.settings.aiSettings?.breachProtection ?? true)
-                    .onChange(async (value: any) => {
-                        this.plugin.settings.aiSettings.breachProtection = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            // AI Insights button
-            new Setting(containerEl)
-                .setName('Get AI security insights')
-                .setDesc('View personalized security recommendations based on your usage patterns')
-                .addButton((button: any) => button
-                    .setButtonText('View Insights')
-                    .onClick(() => {
-                        this.plugin.getAISecurityInsights();
-                    }));
-        }
-
-        // Security Information
-        containerEl.createEl('h3', { text: 'Security Information' });
-
-        const securityInfo = containerEl.createDiv('security-info');
-        securityInfo.createEl('p', {
-            text: 'This plugin uses AES-256-GCM encryption with PBKDF2 key derivation (310,000 iterations). Your password is never stored and cannot be recovered if lost.'
+        this.addCommand({
+            id: 'toggle-encryption',
+            name: 'Toggle encryption (encrypt or decrypt)',
+            checkCallback: (checking: boolean) => {
+                const file = this.app.workspace.getActiveFile();
+                if (file) {
+                    if (!checking) {
+                        this.toggleEncryption();
+                    }
+                    return true;
+                }
+                return false;
+            }
         });
 
-        securityInfo.createEl('p', {
-            cls: 'warning-text',
-            text: '⚠️ Important: Make sure to remember your passwords. There is no way to recover an encrypted note without the correct password.'
+        this.addCommand({
+            id: 'encrypt-directory',
+            name: 'Encrypt all notes in a folder',
+            callback: () => this.encryptDirectory()
         });
 
-        securityInfo.createEl('h4', { text: 'Encryption Details:' });
-        const encryptionDetails = securityInfo.createDiv('encryption-details');
-        encryptionDetails.createEl('div', { text: '• Algorithm: AES-256-GCM (Galois/Counter Mode)' });
-        encryptionDetails.createEl('div', { text: '• Key Derivation: PBKDF2 with SHA-256' });
-        encryptionDetails.createEl('div', { text: '• Iterations: 310,000' });
-        encryptionDetails.createEl('div', { text: '• Salt: 256-bit random salt per encryption' });
-        encryptionDetails.createEl('div', { text: '• IV: 96-bit random initialization vector per encryption' });
+        this.addCommand({
+            id: 'decrypt-directory',
+            name: 'Decrypt all notes in a folder',
+            callback: () => this.decryptDirectory()
+        });
 
-        // Directory Encryption Settings
-        containerEl.createEl('h2', { text: 'Directory Encryption' });
-
-        new Setting(containerEl)
-            .setName('Include subdirectories')
-            .setDesc('Encrypt files in subdirectories when encrypting a directory')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.directoryEncryption.includeSubdirectories)
-                .onChange(async (value) => {
-                    this.plugin.settings.directoryEncryption.includeSubdirectories = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Skip already encrypted')
-            .setDesc('Skip files that are already encrypted when batch encrypting')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.directoryEncryption.skipEncryptedFiles)
-                .onChange(async (value) => {
-                    this.plugin.settings.directoryEncryption.skipEncryptedFiles = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Create manifest file')
-            .setDesc('Create a manifest file tracking encrypted files in the directory')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.directoryEncryption.createManifest)
-                .onChange(async (value) => {
-                    this.plugin.settings.directoryEncryption.createManifest = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Parallel operations')
-            .setDesc('Number of files to encrypt/decrypt in parallel (1-10)')
-            .addSlider(slider => slider
-                .setLimits(1, 10, 1)
-                .setValue(this.plugin.settings.directoryEncryption.parallelOperations)
-                .setDynamicTooltip()
-                .onChange(async (value) => {
-                    this.plugin.settings.directoryEncryption.parallelOperations = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        // Add some basic styling
-        this.addSettingsStyles(containerEl);
+        // Settings tab
+        this.addSettingTab(new NoteEncryptorSettingTab(this.app, this));
     }
 
-    private addSettingsStyles(_containerEl: HTMLElement): void {
-        const existingStyle = document.getElementById('note-encryptor-settings-styles');
-        if (existingStyle) return;
+    async loadSettings() {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    }
 
-        const style = document.createElement('style');
-        style.id = 'note-encryptor-settings-styles';
-        style.textContent = `
-            .security-info {
-                margin: 16px 0;
-                padding: 16px;
-                border: 1px solid var(--background-modifier-border);
-                border-radius: 8px;
-                background-color: var(--background-secondary);
-            }
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
 
-            .security-info p {
-                margin: 8px 0;
-                line-height: 1.5;
-            }
+    async toggleEncryption() {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+            new Notice('No active note');
+            return;
+        }
 
-            .security-info .warning-text {
-                color: var(--text-warning);
-                font-weight: 500;
-                border-left: 3px solid var(--text-warning);
-                padding-left: 12px;
-            }
+        const content = await this.app.vault.read(file);
+        
+        if (isEncrypted(content)) {
+            this.decryptCurrentNote();
+        } else {
+            this.encryptCurrentNote();
+        }
+    }
 
-            .security-info h4 {
-                margin: 16px 0 8px 0;
-                color: var(--text-normal);
-                font-size: 16px;
-            }
+    async encryptCurrentNote() {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+            new Notice('No active note');
+            return;
+        }
 
-            .encryption-details {
-                margin-left: 12px;
-            }
+        const content = await this.app.vault.read(file);
+        
+        if (isEncrypted(content)) {
+            new Notice('Note is already encrypted');
+            return;
+        }
 
-            .encryption-details div {
-                margin: 4px 0;
-                font-size: 13px;
-                color: var(--text-muted);
-                font-family: var(--font-monospace);
-            }
+        if (!content.trim()) {
+            new Notice('Cannot encrypt empty note');
+            return;
+        }
 
-            .setting-item-info {
-                color: var(--text-muted);
-                font-size: 12px;
-                margin-top: 4px;
+        new PasswordModal(
+            this.app,
+            async (password: string) => {
+                try {
+                    const encrypted = await encryptContent(content, password);
+                    await this.app.vault.modify(file, encrypted);
+                    
+                    // Rename file with prefix/suffix
+                    await this.renameEncryptedFile(file, true);
+                    
+                    new Notice('Note encrypted successfully');
+                } catch (error) {
+                    console.error('Encryption failed:', error);
+                    new Notice('Encryption failed. Please try again.');
+                }
+            },
+            true,
+            this.settings.showPasswordStrength,
+            this.settings.passwordMinLength
+        ).open();
+    }
+
+    async decryptCurrentNote() {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+            new Notice('No active note');
+            return;
+        }
+
+        const content = await this.app.vault.read(file);
+        
+        if (!isEncrypted(content)) {
+            new Notice('Note is not encrypted');
+            return;
+        }
+
+        new PasswordModal(
+            this.app,
+            async (password: string) => {
+                try {
+                    const decrypted = await decryptContent(content, password);
+                    await this.app.vault.modify(file, decrypted);
+                    
+                    // Rename file without prefix/suffix
+                    await this.renameEncryptedFile(file, false);
+                    
+                    new Notice('Note decrypted successfully');
+                } catch (error) {
+                    console.error('Decryption failed:', error);
+                    new Notice('Decryption failed. Wrong password?');
+                }
+            },
+            false,
+            false,
+            this.settings.passwordMinLength
+        ).open();
+    }
+
+    async encryptDirectory() {
+        new FolderSelectionModal(this.app, async (folder: TFolder) => {
+            const files = this.getMarkdownFiles(folder);
+            const unencryptedFiles: TFile[] = [];
+            
+            for (const file of files) {
+                const content = await this.app.vault.read(file);
+                if (!isEncrypted(content)) {
+                    unencryptedFiles.push(file);
+                }
             }
-        `;
-        document.head.appendChild(style);
+            
+            if (unencryptedFiles.length === 0) {
+                new Notice('No unencrypted notes found in this folder');
+                return;
+            }
+            
+            new PasswordModal(
+                this.app,
+                async (password: string) => {
+                    let successCount = 0;
+                    let failCount = 0;
+                    
+                    for (const file of unencryptedFiles) {
+                        try {
+                            const content = await this.app.vault.read(file);
+                            const encrypted = await encryptContent(content, password);
+                            
+                            await this.app.vault.modify(file, encrypted);
+                            await this.renameEncryptedFile(file, true);
+                            successCount++;
+                        } catch (error) {
+                            console.error(`Failed to encrypt ${file.path}:`, error);
+                            failCount++;
+                        }
+                    }
+                    
+                    new Notice(`Encrypted ${successCount} notes` + (failCount > 0 ? `, ${failCount} failed` : ''));
+                },
+                true,
+                this.settings.showPasswordStrength,
+                this.settings.passwordMinLength
+            ).open();
+        }).open();
+    }
+
+    async decryptDirectory() {
+        new FolderSelectionModal(this.app, async (folder: TFolder) => {
+            const files = this.getMarkdownFiles(folder);
+            const encryptedFiles: TFile[] = [];
+            
+            for (const file of files) {
+                const content = await this.app.vault.read(file);
+                if (isEncrypted(content)) {
+                    encryptedFiles.push(file);
+                }
+            }
+            
+            if (encryptedFiles.length === 0) {
+                new Notice('No encrypted notes found in this folder');
+                return;
+            }
+            
+            new PasswordModal(
+                this.app,
+                async (password: string) => {
+                    let successCount = 0;
+                    let failCount = 0;
+                    
+                    for (const file of encryptedFiles) {
+                        try {
+                            const content = await this.app.vault.read(file);
+                            const decrypted = await decryptContent(content, password);
+                            await this.app.vault.modify(file, decrypted);
+                            await this.renameEncryptedFile(file, false);
+                            successCount++;
+                        } catch (error) {
+                            console.error(`Failed to decrypt ${file.path}:`, error);
+                            failCount++;
+                        }
+                    }
+                    
+                    new Notice(`Decrypted ${successCount} notes` + (failCount > 0 ? `, ${failCount} failed` : ''));
+                },
+                false,
+                false,
+                this.settings.passwordMinLength
+            ).open();
+        }).open();
+    }
+
+    // Encrypt a specific file (from context menu)
+    private encryptFile(file: TFile) {
+        new PasswordModal(
+            this.app,
+            async (password: string) => {
+                try {
+                    const content = await this.app.vault.read(file);
+                    const encrypted = await encryptContent(content, password);
+                    await this.app.vault.modify(file, encrypted);
+                    await this.renameEncryptedFile(file, true);
+                    new Notice('Note encrypted successfully');
+                } catch (error) {
+                    console.error('Encryption failed:', error);
+                    new Notice('Encryption failed');
+                }
+            },
+            true,
+            this.settings.showPasswordStrength,
+            this.settings.passwordMinLength
+        ).open();
+    }
+
+    // Decrypt a specific file (from context menu)
+    private decryptFile(file: TFile) {
+        new PasswordModal(
+            this.app,
+            async (password: string) => {
+                try {
+                    const content = await this.app.vault.read(file);
+                    const decrypted = await decryptContent(content, password);
+                    await this.app.vault.modify(file, decrypted);
+                    await this.renameEncryptedFile(file, false);
+                    new Notice('Note decrypted successfully');
+                } catch (error) {
+                    console.error('Decryption failed:', error);
+                    new Notice('Decryption failed. Wrong password?');
+                }
+            },
+            false,
+            false,
+            this.settings.passwordMinLength
+        ).open();
+    }
+
+    // Encrypt a specific folder (from context menu)
+    private encryptSpecificDirectory(folder: TFolder) {
+        const files = this.getMarkdownFiles(folder);
+        const unencryptedFiles: TFile[] = [];
+        
+        (async () => {
+            for (const file of files) {
+                const content = await this.app.vault.read(file);
+                if (!isEncrypted(content)) {
+                    unencryptedFiles.push(file);
+                }
+            }
+            
+            if (unencryptedFiles.length === 0) {
+                new Notice('No unencrypted notes found in this folder');
+                return;
+            }
+            
+            new PasswordModal(
+                this.app,
+                async (password: string) => {
+                    let successCount = 0;
+                    let failCount = 0;
+                    
+                    for (const file of unencryptedFiles) {
+                        try {
+                            const content = await this.app.vault.read(file);
+                            const encrypted = await encryptContent(content, password);
+                            
+                            await this.app.vault.modify(file, encrypted);
+                            await this.renameEncryptedFile(file, true);
+                            successCount++;
+                        } catch (error) {
+                            console.error(`Failed to encrypt ${file.path}:`, error);
+                            failCount++;
+                        }
+                    }
+                    
+                    new Notice(`Encrypted ${successCount} notes` + (failCount > 0 ? `, ${failCount} failed` : ''));
+                },
+                true,
+                this.settings.showPasswordStrength,
+                this.settings.passwordMinLength
+            ).open();
+        })();
+    }
+
+    // Decrypt a specific folder (from context menu)
+    private decryptSpecificDirectory(folder: TFolder) {
+        const files = this.getMarkdownFiles(folder);
+        const encryptedFiles: TFile[] = [];
+        
+        (async () => {
+            for (const file of files) {
+                const content = await this.app.vault.read(file);
+                if (isEncrypted(content)) {
+                    encryptedFiles.push(file);
+                }
+            }
+            
+            if (encryptedFiles.length === 0) {
+                new Notice('No encrypted notes found in this folder');
+                return;
+            }
+            
+            new PasswordModal(
+                this.app,
+                async (password: string) => {
+                    let successCount = 0;
+                    let failCount = 0;
+                    
+                    for (const file of encryptedFiles) {
+                        try {
+                            const content = await this.app.vault.read(file);
+                            const decrypted = await decryptContent(content, password);
+                            await this.app.vault.modify(file, decrypted);
+                            await this.renameEncryptedFile(file, false);
+                            successCount++;
+                        } catch (error) {
+                            console.error(`Failed to decrypt ${file.path}:`, error);
+                            failCount++;
+                        }
+                    }
+                    
+                    new Notice(`Decrypted ${successCount} notes` + (failCount > 0 ? `, ${failCount} failed` : ''));
+                },
+                false,
+                false,
+                this.settings.passwordMinLength
+            ).open();
+        })();
+    }
+
+    private getMarkdownFiles(folder: TFolder): TFile[] {
+        const files: TFile[] = [];
+        
+        const processFolder = (f: TFolder) => {
+            for (const child of f.children) {
+                if (child instanceof TFile && child.extension === 'md') {
+                    files.push(child);
+                } else if (child instanceof TFolder) {
+                    processFolder(child);
+                }
+            }
+        };
+        
+        processFolder(folder);
+        return files;
+    }
+
+    private async renameEncryptedFile(file: TFile, encrypting: boolean) {
+        const prefix = this.settings.encryptedNotePrefix;
+        const suffix = this.settings.encryptedNoteSuffix;
+        
+        if (!prefix && !suffix) { return; }
+
+        const baseName = file.basename;
+        const extension = file.extension;
+        const folder = file.parent?.path || '';
+        
+        let newName: string;
+        
+        if (encrypting) {
+            newName = `${prefix}${baseName}${suffix}`;
+        } else {
+            newName = baseName;
+            if (prefix && newName.startsWith(prefix)) {
+                newName = newName.slice(prefix.length);
+            }
+            if (suffix && newName.endsWith(suffix)) {
+                newName = newName.slice(0, -suffix.length);
+            }
+        }
+
+        const newPath = folder ? `${folder}/${newName}.${extension}` : `${newName}.${extension}`;
+        
+        if (newPath !== file.path) {
+            try {
+                await this.app.fileManager.renameFile(file, newPath);
+            } catch (error) {
+                console.error('Failed to rename file:', error);
+            }
+        }
     }
 }
