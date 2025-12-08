@@ -6,11 +6,11 @@
  * @license MIT
  */
 
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
+import { App, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
 
-// ============================================================================
+// ======================================================================
 // Constants
-// ============================================================================
+// ======================================================================
 
 const CRYPTO_CONSTANTS = {
     ALGORITHM: 'AES-GCM',
@@ -22,15 +22,16 @@ const CRYPTO_CONSTANTS = {
     ENCRYPTION_HEADER_END: '-----END ENCRYPTED NOTE-----',
 } as const;
 
-// ============================================================================
+// ======================================================================
 // Types & Interfaces
-// ============================================================================
+// ======================================================================
 
 interface NoteEncryptorSettings {
     encryptedNotePrefix: string;
     encryptedNoteSuffix: string;
     showPasswordStrength: boolean;
     passwordMinLength: number;
+    hideEncryptedContent: boolean;
 }
 
 const DEFAULT_SETTINGS: NoteEncryptorSettings = {
@@ -38,6 +39,7 @@ const DEFAULT_SETTINGS: NoteEncryptorSettings = {
     encryptedNoteSuffix: '',
     showPasswordStrength: true,
     passwordMinLength: 8,
+    hideEncryptedContent: true,
 };
 
 interface PasswordStrength {
@@ -47,9 +49,9 @@ interface PasswordStrength {
     color: string;
 }
 
-// ============================================================================
+// ======================================================================
 // Crypto Utilities
-// ============================================================================
+// ======================================================================
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer);
@@ -174,9 +176,9 @@ function calculatePasswordStrength(password: string): PasswordStrength {
     return { score, percentage, text, color };
 }
 
-// ============================================================================
+// ======================================================================
 // Password Modal
-// ============================================================================
+// ======================================================================
 
 class PasswordModal extends Modal {
     private password = '';
@@ -200,7 +202,7 @@ class PasswordModal extends Modal {
         contentEl.addClass('note-encryptor-modal');
 
         contentEl.createEl('h2', { text: this.isEncrypting ? '🔒 Encrypt Note' : '🔓 Decrypt Note' });
-
+        
         const passwordContainer = contentEl.createDiv('password-container');
         passwordContainer.createEl('label', { text: 'Password' });
         const passwordInput = passwordContainer.createEl('input', { type: 'password', placeholder: 'Enter password' });
@@ -299,9 +301,9 @@ class PasswordModal extends Modal {
     }
 }
 
-// ============================================================================
+// ======================================================================
 // Folder Selection Modal
-// ============================================================================
+// ======================================================================
 
 class FolderSelectionModal extends Modal {
     private onChoose: (folder: TFolder) => void;
@@ -355,9 +357,9 @@ class FolderSelectionModal extends Modal {
     onClose() { this.contentEl.empty(); }
 }
 
-// ============================================================================
+// ======================================================================
 // Settings Tab
-// ============================================================================
+// ======================================================================
 
 class NoteEncryptorSettingTab extends PluginSettingTab {
     plugin: NoteEncryptorPlugin;
@@ -398,6 +400,16 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
             .addToggle(toggle => toggle.setValue(this.plugin.settings.showPasswordStrength)
                 .onChange(async (value) => { this.plugin.settings.showPasswordStrength = value; await this.plugin.saveSettings(); }));
 
+        new Setting(containerEl)
+            .setName('Hide encrypted content')
+            .setDesc('Hide the encrypted content in the editor and show a lock screen instead')
+            .addToggle(toggle => toggle.setValue(this.plugin.settings.hideEncryptedContent)
+                .onChange(async (value) => { 
+                    this.plugin.settings.hideEncryptedContent = value; 
+                    await this.plugin.saveSettings(); 
+                    this.plugin.updateEncryptedViews(); 
+                }));
+
         containerEl.createEl('h3', { text: 'About' });
         const infoEl = containerEl.createDiv('security-info');
         infoEl.innerHTML = `
@@ -410,15 +422,16 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
     }
 }
 
-// ============================================================================
+// ======================================================================
 // Main Plugin
-// ============================================================================
+// ======================================================================
 
 export default class NoteEncryptorPlugin extends Plugin {
     settings: NoteEncryptorSettings = DEFAULT_SETTINGS;
 
     async onload() {
         await this.loadSettings();
+        this.addEncryptedOverlayStyles();
 
         // Context menu for files and folders
         this.registerEvent(
@@ -482,6 +495,28 @@ export default class NoteEncryptorPlugin extends Plugin {
         });
 
         this.addSettingTab(new NoteEncryptorSettingTab(this.app, this));
+
+        // Register event to check for encrypted content when switching files
+        this.registerEvent(
+            this.app.workspace.on('active-leaf-change', () => {
+                this.updateEncryptedViews();
+            })
+        );
+
+        // Also check when file is modified
+        this.registerEvent(
+            this.app.vault.on('modify', (file) => {
+                const activeFile = this.app.workspace.getActiveFile();
+                if (activeFile && file.path === activeFile.path) {
+                    setTimeout(() => this.updateEncryptedViews(), 100);
+                }
+            })
+        );
+
+        // Initial check when layout is ready
+        this.app.workspace.onLayoutReady(() => {
+            this.updateEncryptedViews();
+        });
     }
 
     async loadSettings() {
@@ -492,9 +527,145 @@ export default class NoteEncryptorPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
-    // ========================================================================
+    // ======================================================================
+    // Encrypted Content Overlay
+    // ======================================================================
+
+    private addEncryptedOverlayStyles() {
+        if (document.getElementById('note-encryptor-overlay-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'note-encryptor-overlay-styles';
+        style.textContent = `
+            .encrypted-content-overlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: var(--background-primary);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                z-index: 100;
+                gap: 16px;
+            }
+            .encrypted-lock-icon {
+                color: var(--text-muted);
+                opacity: 0.6;
+            }
+            .encrypted-lock-icon svg {
+                width: 64px;
+                height: 64px;
+            }
+            .encrypted-message {
+                font-size: 1.4em;
+                font-weight: 600;
+                color: var(--text-normal);
+            }
+            .encrypted-filename {
+                font-size: 0.95em;
+                color: var(--text-muted);
+                max-width: 80%;
+                text-align: center;
+                word-break: break-word;
+            }
+            .encrypted-decrypt-btn {
+                margin-top: 16px;
+                padding: 10px 24px;
+                font-size: 14px;
+                font-weight: 500;
+                background: var(--interactive-accent);
+                color: var(--text-on-accent);
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: background 0.15s ease;
+            }
+            .encrypted-decrypt-btn:hover {
+                background: var(--interactive-accent-hover);
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    updateEncryptedViews() {
+        const leaves = this.app.workspace.getLeavesOfType('markdown');
+        
+        for (const leaf of leaves) {
+            const view = leaf.view as MarkdownView;
+            const container = view.containerEl;
+            const contentContainer = container.querySelector('.cm-editor') as HTMLElement || 
+                                     container.querySelector('.markdown-preview-view') as HTMLElement;
+            
+            if (!contentContainer) continue;
+            
+            const parentEl = contentContainer.parentElement;
+            if (!parentEl) continue;
+            
+            const existingOverlay = parentEl.querySelector('.encrypted-content-overlay');
+            
+            if (!this.settings.hideEncryptedContent) {
+                existingOverlay?.remove();
+                continue;
+            }
+
+            const file = view.file;
+            if (!file) {
+                existingOverlay?.remove();
+                continue;
+            }
+
+            // Read file content to check if encrypted
+            this.app.vault.read(file).then(content => {
+                const encrypted = isEncrypted(content);
+                
+                if (encrypted && !existingOverlay) {
+                    this.addEncryptedOverlay(parentEl as HTMLElement, file);
+                } else if (!encrypted && existingOverlay) {
+                    existingOverlay.remove();
+                }
+            });
+        }
+    }
+
+    private addEncryptedOverlay(container: HTMLElement, file: TFile) {
+        // Remove any existing overlay first
+        container.querySelector('.encrypted-content-overlay')?.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'encrypted-content-overlay';
+        
+        const lockIcon = document.createElement('div');
+        lockIcon.className = 'encrypted-lock-icon';
+        lockIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`;
+        overlay.appendChild(lockIcon);
+        
+        const message = document.createElement('div');
+        message.className = 'encrypted-message';
+        message.textContent = 'This note is encrypted';
+        overlay.appendChild(message);
+        
+        const filename = document.createElement('div');
+        filename.className = 'encrypted-filename';
+        filename.textContent = file.basename;
+        overlay.appendChild(filename);
+        
+        const decryptBtn = document.createElement('button');
+        decryptBtn.className = 'encrypted-decrypt-btn';
+        decryptBtn.textContent = '🔓 Decrypt to view';
+        decryptBtn.onclick = () => {
+            this.decryptFile(file);
+        };
+        overlay.appendChild(decryptBtn);
+
+        container.style.position = 'relative';
+        container.appendChild(overlay);
+    }
+
+    // ======================================================================
     // Core Methods
-    // ========================================================================
+    // ======================================================================
 
     private async toggleEncryption(file: TFile) {
         const content = await this.app.vault.read(file);
@@ -525,6 +696,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                     await this.app.vault.modify(file, encrypted);
                     await this.renameFile(file, true);
                     new Notice('Note encrypted successfully');
+                    setTimeout(() => this.updateEncryptedViews(), 100);
                 } catch (error) {
                     console.error('Encryption failed:', error);
                     new Notice('Encryption failed');
@@ -552,6 +724,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                     await this.app.vault.modify(file, decrypted);
                     await this.renameFile(file, false);
                     new Notice('Note decrypted successfully');
+                    setTimeout(() => this.updateEncryptedViews(), 100);
                 } catch (error) {
                     console.error('Decryption failed:', error);
                     new Notice('Decryption failed. Wrong password?');
@@ -605,6 +778,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                 }
                 
                 new Notice(`${encrypting ? 'Encrypted' : 'Decrypted'} ${success} notes${fail > 0 ? `, ${fail} failed` : ''}`);
+                setTimeout(() => this.updateEncryptedViews(), 100);
             },
             encrypting,
             encrypting && this.settings.showPasswordStrength,
@@ -612,9 +786,9 @@ export default class NoteEncryptorPlugin extends Plugin {
         ).open();
     }
 
-    // ========================================================================
+    // ======================================================================
     // Helpers
-    // ========================================================================
+    // ======================================================================
 
     private getMarkdownFiles(folder: TFolder): TFile[] {
         const files: TFile[] = [];
