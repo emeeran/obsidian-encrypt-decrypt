@@ -1,11 +1,11 @@
 {
-  "id": "note-encryptor",
-  "name": "Note Encryptor",
-  "version": "1.0.0",
-  "minAppVersion": "0.15.0",
-  "description": "Encrypt individual notes with AES-256-GCM encryption. Right-click context menu and command palette support.",
-  "author": "Meeran E Mandhini",
-  "authorUrl": "https://github.com/meeran",
-  "fundingUrl": "",
-  "isDesktopOnly": false
+	"id": "note-encryptor",
+	"name": "Note Encryptor",
+	"version": "1.1.0",
+	"minAppVersion": "1.0.0",
+	"description": "Encrypt entire notes or selected text inline with AES-256-GCM encryption. Features password strength indicator, folder batch encryption, and secure content hiding.",
+	"author": "emeeran",
+	"authorUrl": "https://github.com/emeeran",
+	"fundingUrl": "",
+	"isDesktopOnly": false
 }

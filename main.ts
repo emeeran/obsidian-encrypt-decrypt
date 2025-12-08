@@ -1,12 +1,14 @@
 /**
  * Note Encryptor - Obsidian Plugin
- * Encrypt individual notes with AES-256-GCM encryption
+ * Encrypt entire notes or selected text inline with AES-256-GCM encryption
  * 
- * @version 1.0.0
+ * @version 1.1.0
+ * @author emeeran
  * @license MIT
+ * @see https://github.com/emeeran/obsidian-encrypt-decrypt
  */
 
-import { App, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from 'obsidian';
 
 // ======================================================================
 // Constants
@@ -20,6 +22,8 @@ const CRYPTO_CONSTANTS = {
     PBKDF2_ITERATIONS: 310000,
     ENCRYPTION_HEADER_START: '-----BEGIN ENCRYPTED NOTE-----',
     ENCRYPTION_HEADER_END: '-----END ENCRYPTED NOTE-----',
+    INLINE_ENCRYPTION_START: '🔐«',
+    INLINE_ENCRYPTION_END: '»🔐',
 } as const;
 
 // ======================================================================
@@ -63,7 +67,9 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
-    const binary = atob(base64);
+    // Clean the base64 string - remove any whitespace or invalid characters
+    const cleanBase64 = base64.replace(/[\s\n\r]/g, '');
+    const binary = atob(cleanBase64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
@@ -145,9 +151,108 @@ async function decryptContent(encryptedContent: string, password: string): Promi
     return new TextDecoder().decode(decrypted);
 }
 
+// Inline encryption - encrypts to a compact base64 string
+async function encryptInline(content: string, password: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(CRYPTO_CONSTANTS.SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(CRYPTO_CONSTANTS.IV_LENGTH));
+    const key = await deriveKey(password, salt);
+
+    const encrypted = await crypto.subtle.encrypt(
+        { name: CRYPTO_CONSTANTS.ALGORITHM, iv: iv },
+        key,
+        encoder.encode(content)
+    );
+
+    const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+    const base64 = arrayBufferToBase64(combined.buffer);
+    return `${CRYPTO_CONSTANTS.INLINE_ENCRYPTION_START}${base64}${CRYPTO_CONSTANTS.INLINE_ENCRYPTION_END}`;
+}
+
+// Inline decryption
+async function decryptInline(encryptedContent: string, password: string): Promise<string> {
+    // Extract just the base64 content between markers
+    const startMarker = CRYPTO_CONSTANTS.INLINE_ENCRYPTION_START;
+    const endMarker = CRYPTO_CONSTANTS.INLINE_ENCRYPTION_END;
+    
+    const startIdx = encryptedContent.indexOf(startMarker);
+    const endIdx = encryptedContent.indexOf(endMarker);
+    
+    if (startIdx === -1 || endIdx === -1) {
+        throw new Error('Invalid inline encrypted content format');
+    }
+    
+    // Extract and clean the base64 string
+    const base64 = encryptedContent.slice(startIdx + startMarker.length, endIdx).trim();
+    
+    if (!base64) {
+        throw new Error('Empty encrypted content');
+    }
+    
+    try {
+        const combined = new Uint8Array(base64ToArrayBuffer(base64));
+        
+        if (combined.length < CRYPTO_CONSTANTS.SALT_LENGTH + CRYPTO_CONSTANTS.IV_LENGTH + 1) {
+            throw new Error('Encrypted data too short');
+        }
+        
+        const salt = combined.slice(0, CRYPTO_CONSTANTS.SALT_LENGTH);
+        const iv = combined.slice(CRYPTO_CONSTANTS.SALT_LENGTH, CRYPTO_CONSTANTS.SALT_LENGTH + CRYPTO_CONSTANTS.IV_LENGTH);
+        const data = combined.slice(CRYPTO_CONSTANTS.SALT_LENGTH + CRYPTO_CONSTANTS.IV_LENGTH);
+        
+        const key = await deriveKey(password, salt);
+        
+        const decrypted = await crypto.subtle.decrypt(
+            { name: CRYPTO_CONSTANTS.ALGORITHM, iv: iv },
+            key,
+            data
+        );
+
+        return new TextDecoder().decode(decrypted);
+    } catch (error) {
+        console.error('Decryption error:', error);
+        throw new Error('Decryption failed - wrong password or corrupted data');
+    }
+}
+
 function isEncrypted(content: string): boolean {
     return content.includes(CRYPTO_CONSTANTS.ENCRYPTION_HEADER_START) &&
            content.includes(CRYPTO_CONSTANTS.ENCRYPTION_HEADER_END);
+}
+
+function isInlineEncrypted(content: string): boolean {
+    return content.includes(CRYPTO_CONSTANTS.INLINE_ENCRYPTION_START) &&
+           content.includes(CRYPTO_CONSTANTS.INLINE_ENCRYPTION_END);
+}
+
+function findInlineEncryptedBlocks(content: string): { start: number; end: number; content: string }[] {
+    const blocks: { start: number; end: number; content: string }[] = [];
+    const startMarker = CRYPTO_CONSTANTS.INLINE_ENCRYPTION_START;
+    const endMarker = CRYPTO_CONSTANTS.INLINE_ENCRYPTION_END;
+    
+    let searchStart = 0;
+    while (true) {
+        const startIdx = content.indexOf(startMarker, searchStart);
+        if (startIdx === -1) break;
+        
+        const endIdx = content.indexOf(endMarker, startIdx);
+        if (endIdx === -1) break;
+        
+        const fullEnd = endIdx + endMarker.length;
+        blocks.push({
+            start: startIdx,
+            end: fullEnd,
+            content: content.slice(startIdx, fullEnd)
+        });
+        
+        searchStart = fullEnd;
+    }
+    
+    return blocks;
 }
 
 function calculatePasswordStrength(password: string): PasswordStrength {
@@ -187,13 +292,15 @@ class PasswordModal extends Modal {
     private isEncrypting: boolean;
     private showStrength: boolean;
     private minLength: number;
+    private title: string;
 
-    constructor(app: App, onSubmit: (password: string) => void, isEncrypting: boolean, showStrength = true, minLength = 8) {
+    constructor(app: App, onSubmit: (password: string) => void, isEncrypting: boolean, showStrength = true, minLength = 8, title?: string) {
         super(app);
         this.onSubmit = onSubmit;
         this.isEncrypting = isEncrypting;
         this.showStrength = showStrength;
         this.minLength = minLength;
+        this.title = title || (isEncrypting ? '🔒 Encrypt' : '🔓 Decrypt');
     }
 
     onOpen() {
@@ -201,7 +308,7 @@ class PasswordModal extends Modal {
         contentEl.empty();
         contentEl.addClass('note-encryptor-modal');
 
-        contentEl.createEl('h2', { text: this.isEncrypting ? '🔒 Encrypt Note' : '🔓 Decrypt Note' });
+        contentEl.createEl('h2', { text: this.title });
         
         const passwordContainer = contentEl.createDiv('password-container');
         passwordContainer.createEl('label', { text: 'Password' });
@@ -298,6 +405,90 @@ class PasswordModal extends Modal {
             .button-container { display: flex; justify-content: flex-end; gap: 10px; }
         `;
         document.head.appendChild(style);
+    }
+}
+
+// ======================================================================
+// Inline Decrypt Modal - Shows decrypted content temporarily
+// ======================================================================
+
+class InlineDecryptModal extends Modal {
+    private encryptedContent: string;
+    private minLength: number;
+    private decryptedText: string = '';
+
+    constructor(app: App, encryptedContent: string, minLength = 8) {
+        super(app);
+        this.encryptedContent = encryptedContent;
+        this.minLength = minLength;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('note-encryptor-modal');
+
+        contentEl.createEl('h2', { text: '🔓 View Encrypted Text' });
+        
+        const passwordContainer = contentEl.createDiv('password-container');
+        passwordContainer.createEl('label', { text: 'Password' });
+        const passwordInput = passwordContainer.createEl('input', { type: 'password', placeholder: 'Enter password' });
+        passwordInput.addClass('password-input');
+
+        const errorEl = contentEl.createDiv('error-message');
+        errorEl.style.display = 'none';
+
+        const decryptedContainer = contentEl.createDiv('decrypted-container');
+        decryptedContainer.style.display = 'none';
+        decryptedContainer.style.cssText = 'margin: 16px 0; padding: 16px; background: var(--background-secondary); border-radius: 8px; font-family: var(--font-monospace); white-space: pre-wrap; word-break: break-word;';
+
+        const buttonContainer = contentEl.createDiv('button-container');
+        const closeBtn = buttonContainer.createEl('button', { text: 'Close' });
+        closeBtn.onclick = () => this.close();
+
+        const decryptBtn = buttonContainer.createEl('button', { text: 'Decrypt' });
+        decryptBtn.addClass('mod-cta');
+
+        const copyBtn = buttonContainer.createEl('button', { text: 'Copy' });
+        copyBtn.style.display = 'none';
+
+        decryptBtn.onclick = async () => {
+            errorEl.style.display = 'none';
+            const password = passwordInput.value;
+            
+            if (password.length < this.minLength) {
+                errorEl.textContent = `Password must be at least ${this.minLength} characters`;
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                this.decryptedText = await decryptInline(this.encryptedContent, password);
+                decryptedContainer.textContent = this.decryptedText;
+                decryptedContainer.style.display = 'block';
+                passwordContainer.style.display = 'none';
+                decryptBtn.style.display = 'none';
+                copyBtn.style.display = 'inline-block';
+            } catch (error) {
+                errorEl.textContent = 'Decryption failed. Wrong password?';
+                errorEl.style.display = 'block';
+            }
+        };
+
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(this.decryptedText);
+            new Notice('Copied to clipboard');
+        };
+
+        const handleEnter = (e: KeyboardEvent) => { if (e.key === 'Enter') decryptBtn.click(); };
+        passwordInput.onkeydown = handleEnter;
+
+        passwordInput.focus();
+    }
+
+    onClose() {
+        this.decryptedText = '';
+        this.contentEl.empty();
     }
 }
 
@@ -402,7 +593,7 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Hide encrypted content')
-            .setDesc('Hide the encrypted content in the editor and show a lock screen instead')
+            .setDesc('Hide the encrypted content in the editor and show a lock screen instead (full note encryption only)')
             .addToggle(toggle => toggle.setValue(this.plugin.settings.hideEncryptedContent)
                 .onChange(async (value) => { 
                     this.plugin.settings.hideEncryptedContent = value; 
@@ -410,15 +601,33 @@ class NoteEncryptorSettingTab extends PluginSettingTab {
                     this.plugin.updateEncryptedViews(); 
                 }));
 
+        containerEl.createEl('h3', { text: 'Usage' });
+        const usageEl = containerEl.createDiv('usage-info');
+        usageEl.innerHTML = `
+            <p><strong>Full Note Encryption:</strong></p>
+            <ul>
+                <li>Right-click a note → "Encrypt note"</li>
+                <li>Command palette: "Encrypt current note"</li>
+            </ul>
+            <p><strong>Inline Encryption (encrypt selected text):</strong></p>
+            <ul>
+                <li>Select text → Command palette: "Encrypt selection"</li>
+                <li>Select text → Right-click → "Encrypt selection"</li>
+                <li>Encrypted text appears as: 🔐«...»🔐</li>
+                <li>Click on encrypted text or use "Decrypt at cursor" to view</li>
+            </ul>
+        `;
+        usageEl.style.cssText = 'padding: 12px; background: var(--background-secondary); border-radius: 6px; font-size: 13px; line-height: 1.6;';
+
         containerEl.createEl('h3', { text: 'About' });
         const infoEl = containerEl.createDiv('security-info');
         infoEl.innerHTML = `
             <p><strong>Encryption:</strong> AES-256-GCM with PBKDF2 key derivation</p>
             <p><strong>Iterations:</strong> 310,000 (OWASP recommended)</p>
             <p><strong>Security:</strong> Your password is never stored. Each encryption uses a unique random salt and IV.</p>
-            <p style="color: var(--text-warning); margin-top: 12px;">⚠️ <strong>Important:</strong> There is no way to recover an encrypted note without the correct password.</p>
+            <p style="color: var(--text-warning); margin-top: 12px;">⚠️ <strong>Important:</strong> There is no way to recover encrypted content without the correct password.</p>
         `;
-        infoEl.style.cssText = 'padding: 12px; background: var(--background-secondary); border-radius: 6px; font-size: 13px; line-height: 1.6;';
+        infoEl.style.cssText = 'padding: 12px; background: var(--background-secondary); border-radius: 6px; font-size: 13px; line-height: 1.6; margin-top: 12px;';
     }
 }
 
@@ -451,7 +660,25 @@ export default class NoteEncryptorPlugin extends Plugin {
             })
         );
 
-        // Commands
+        // Context menu for editor (text selection)
+        this.registerEvent(
+            this.app.workspace.on('editor-menu', (menu, editor, view) => {
+                const selection = editor.getSelection();
+                
+                if (selection && selection.length > 0) {
+                    // Check if selection is an encrypted block
+                    if (isInlineEncrypted(selection)) {
+                        menu.addItem((item) => item.setTitle('🔓 Decrypt selection').setIcon('unlock')
+                            .onClick(() => this.decryptSelection(editor)));
+                    } else {
+                        menu.addItem((item) => item.setTitle('🔐 Encrypt selection').setIcon('lock')
+                            .onClick(() => this.encryptSelection(editor)));
+                    }
+                }
+            })
+        );
+
+        // Commands for full note encryption
         this.addCommand({
             id: 'encrypt-note',
             name: 'Encrypt current note',
@@ -482,6 +709,60 @@ export default class NoteEncryptorPlugin extends Plugin {
             }
         });
 
+        // Commands for inline encryption
+        this.addCommand({
+            id: 'encrypt-selection',
+            name: 'Encrypt selection (inline)',
+            editorCheckCallback: (checking, editor, view) => {
+                const selection = editor.getSelection();
+                if (selection && selection.length > 0 && !isInlineEncrypted(selection)) {
+                    if (!checking) this.encryptSelection(editor);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        this.addCommand({
+            id: 'decrypt-selection',
+            name: 'Decrypt selection (inline)',
+            editorCheckCallback: (checking, editor, view) => {
+                const selection = editor.getSelection();
+                if (selection && isInlineEncrypted(selection)) {
+                    if (!checking) this.decryptSelection(editor);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        this.addCommand({
+            id: 'decrypt-at-cursor',
+            name: 'Decrypt at cursor (view encrypted text)',
+            editorCheckCallback: (checking, editor, view) => {
+                const encryptedBlock = this.findEncryptedBlockAtCursor(editor);
+                if (encryptedBlock) {
+                    if (!checking) this.viewEncryptedAtCursor(editor, encryptedBlock);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        this.addCommand({
+            id: 'decrypt-inline-in-place',
+            name: 'Decrypt at cursor (replace with decrypted text)',
+            editorCheckCallback: (checking, editor, view) => {
+                const encryptedBlock = this.findEncryptedBlockAtCursor(editor);
+                if (encryptedBlock) {
+                    if (!checking) this.decryptInlineAtCursor(editor, encryptedBlock);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        // Folder commands
         this.addCommand({
             id: 'encrypt-directory',
             name: 'Encrypt all notes in a folder',
@@ -525,6 +806,121 @@ export default class NoteEncryptorPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
+    }
+
+    // ======================================================================
+    // Inline Encryption Methods
+    // ======================================================================
+
+    private async encryptSelection(editor: Editor) {
+        const selection = editor.getSelection();
+        if (!selection || selection.length === 0) {
+            new Notice('No text selected');
+            return;
+        }
+
+        new PasswordModal(
+            this.app,
+            async (password) => {
+                try {
+                    const encrypted = await encryptInline(selection, password);
+                    editor.replaceSelection(encrypted);
+                    new Notice('Text encrypted');
+                } catch (error) {
+                    console.error('Inline encryption failed:', error);
+                    new Notice('Encryption failed');
+                }
+            },
+            true,
+            this.settings.showPasswordStrength,
+            this.settings.passwordMinLength,
+            '🔐 Encrypt Selection'
+        ).open();
+    }
+
+    private async decryptSelection(editor: Editor) {
+        const selection = editor.getSelection();
+        if (!selection || !isInlineEncrypted(selection)) {
+            new Notice('No encrypted text selected');
+            return;
+        }
+
+        new PasswordModal(
+            this.app,
+            async (password) => {
+                try {
+                    const decrypted = await decryptInline(selection, password);
+                    editor.replaceSelection(decrypted);
+                    new Notice('Text decrypted');
+                } catch (error) {
+                    console.error('Inline decryption failed:', error);
+                    new Notice('Decryption failed. Wrong password?');
+                }
+            },
+            false,
+            false,
+            this.settings.passwordMinLength,
+            '🔓 Decrypt Selection'
+        ).open();
+    }
+
+    private findEncryptedBlockAtCursor(editor: Editor): { start: number; end: number; content: string; from: { line: number; ch: number }; to: { line: number; ch: number } } | null {
+        const cursor = editor.getCursor();
+        const lineContent = editor.getLine(cursor.line);
+        
+        // Find all encrypted blocks in the current line
+        const blocks = findInlineEncryptedBlocks(lineContent);
+        
+        for (const block of blocks) {
+            // Check if cursor is within this block
+            if (cursor.ch >= block.start && cursor.ch <= block.end) {
+                return {
+                    ...block,
+                    from: { line: cursor.line, ch: block.start },
+                    to: { line: cursor.line, ch: block.end }
+                };
+            }
+        }
+        
+        // Also check if selection spans an encrypted block
+        const selection = editor.getSelection();
+        if (selection && isInlineEncrypted(selection)) {
+            const from = editor.getCursor('from');
+            const to = editor.getCursor('to');
+            return {
+                start: 0,
+                end: selection.length,
+                content: selection,
+                from,
+                to
+            };
+        }
+        
+        return null;
+    }
+
+    private viewEncryptedAtCursor(editor: Editor, block: { content: string }) {
+        new InlineDecryptModal(this.app, block.content, this.settings.passwordMinLength).open();
+    }
+
+    private async decryptInlineAtCursor(editor: Editor, block: { content: string; from: { line: number; ch: number }; to: { line: number; ch: number } }) {
+        new PasswordModal(
+            this.app,
+            async (password) => {
+                try {
+                    const decrypted = await decryptInline(block.content, password);
+                    editor.replaceRange(decrypted, block.from, block.to);
+                    new Notice('Text decrypted');
+                } catch (error) {
+                    console.error('Inline decryption failed:', error);
+                    new Notice('Decryption failed. Wrong password?');
+                }
+            },
+            false,
+            false,
+            this.settings.passwordMinLength,
+            '🔓 Decrypt Text'
+        ).open();
     }
 
     // ======================================================================
@@ -616,7 +1012,7 @@ export default class NoteEncryptorPlugin extends Plugin {
                 continue;
             }
 
-            // Read file content to check if encrypted
+            // Read file content to check if encrypted (full note, not inline)
             this.app.vault.read(file).then(content => {
                 const encrypted = isEncrypted(content);
                 

@@ -1,24 +1,205 @@
-/* Optional styles for the Note Encryptor plugin */
+/* Note Encryptor Plugin Styles */
 
-/* Encrypted note visual indicator */
-.encrypted-note-indicator {
-    color: var(--text-accent);
-    font-weight: bold;
-}
+/* ============================================
+   Password Modal
+   ============================================ */
 
-/* Password modal styling */
 .note-encryptor-modal {
     padding: 20px;
+    max-width: 400px;
 }
 
 .note-encryptor-modal h2 {
     margin-bottom: 20px;
+    font-size: 1.3em;
 }
 
-/* Settings page */
+.note-encryptor-modal .password-container {
+    margin-bottom: 16px;
+}
+
+.note-encryptor-modal .password-container label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    color: var(--text-normal);
+}
+
+.note-encryptor-modal .password-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 14px;
+    transition: border-color 0.15s ease;
+}
+
+.note-encryptor-modal .password-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.note-encryptor-modal .strength-container {
+    margin-bottom: 16px;
+}
+
+.note-encryptor-modal .strength-bar {
+    height: 4px;
+    width: 0;
+    background: #dc3545;
+    border-radius: 2px;
+    transition: all 0.3s ease;
+    margin-bottom: 6px;
+}
+
+.note-encryptor-modal .strength-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.note-encryptor-modal .error-message {
+    color: #dc3545;
+    font-size: 13px;
+    margin-bottom: 16px;
+    padding: 8px 12px;
+    background: rgba(220, 53, 69, 0.1);
+    border-radius: 4px;
+}
+
+.note-encryptor-modal .button-container {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.note-encryptor-modal .decrypted-container {
+    margin: 16px 0;
+    padding: 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    font-family: var(--font-monospace);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* ============================================
+   Encrypted Content Overlay
+   ============================================ */
+
+.encrypted-content-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--background-primary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    gap: 16px;
+}
+
+.encrypted-lock-icon {
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+.encrypted-lock-icon svg {
+    width: 64px;
+    height: 64px;
+}
+
+.encrypted-message {
+    font-size: 1.4em;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.encrypted-filename {
+    font-size: 0.95em;
+    color: var(--text-muted);
+    max-width: 80%;
+    text-align: center;
+    word-break: break-word;
+}
+
+.encrypted-decrypt-btn {
+    margin-top: 16px;
+    padding: 10px 24px;
+    font-size: 14px;
+    font-weight: 500;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.encrypted-decrypt-btn:hover {
+    background: var(--interactive-accent-hover);
+    transform: translateY(-1px);
+}
+
+.encrypted-decrypt-btn:active {
+    transform: translateY(0);
+}
+
+/* ============================================
+   Folder Selection Modal
+   ============================================ */
+
+.folder-selection-modal {
+    padding: 20px;
+}
+
+.folder-selection-modal h2 {
+    margin-bottom: 16px;
+}
+
+.folder-selection-modal .folder-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+}
+
+.folder-selection-modal .folder-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-radius: 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+    transition: background-color 0.1s ease;
+}
+
+.folder-selection-modal .folder-item:last-child {
+    border-bottom: none;
+}
+
+.folder-selection-modal .folder-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+/* ============================================
+   Settings Page
+   ============================================ */
+
 .note-encryptor-settings h3 {
     margin-top: 30px;
     margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .note-encryptor-settings p {
@@ -26,4 +207,24 @@
     font-size: 0.9em;
     line-height: 1.5;
     margin-bottom: 10px;
+}
+
+.note-encryptor-settings .security-info,
+.note-encryptor-settings .usage-info {
+    padding: 12px 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.note-encryptor-settings .security-info ul,
+.note-encryptor-settings .usage-info ul {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.note-encryptor-settings .security-info li,
+.note-encryptor-settings .usage-info li {
+    margin: 4px 0;
 }

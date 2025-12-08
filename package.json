@@ -1,28 +1,38 @@
 {
-  "name": "obsidian-note-encryptor",
-  "version": "1.0.0",
-  "description": "Encrypt individual notes with password protection using AES-256-GCM",
-  "main": "main.js",
-  "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "version": "node version-bump.mjs && git add manifest.json versions.json"
-  },
-  "keywords": [
-    "obsidian",
-    "plugin",
-    "encryption",
-    "security",
-    "aes-256"
-  ],
-  "author": "Meeran E Mandhini",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^16.11.6",
-    "builtin-modules": "^3.3.0",
-    "esbuild": "^0.17.3",
-    "obsidian": "latest",
-    "tslib": "^2.4.0",
-    "typescript": "^4.7.4"
-  }
+	"name": "obsidian-note-encryptor",
+	"version": "1.1.0",
+	"description": "Encrypt entire notes or selected text inline with AES-256-GCM encryption",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"version": "node version-bump.mjs && git add manifest.json versions.json"
+	},
+	"keywords": [
+		"obsidian",
+		"obsidian-plugin",
+		"plugin",
+		"encryption",
+		"security",
+		"aes-256",
+		"privacy",
+		"password-protection"
+	],
+	"author": "emeeran",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/emeeran/obsidian-encrypt-decrypt.git"
+	},
+	"bugs": {
+		"url": "https://github.com/emeeran/obsidian-encrypt-decrypt/issues"
+	},
+	"devDependencies": {
+		"@types/node": "^16.11.6",
+		"builtin-modules": "^3.3.0",
+		"esbuild": "^0.17.3",
+		"obsidian": "latest",
+		"tslib": "^2.4.0",
+		"typescript": "^4.7.4"
+	}
 }
