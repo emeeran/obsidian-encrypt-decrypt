@@ -8,9 +8,9 @@ A simple, secure Obsidian plugin that encrypts individual notes with password pr
 - 🎯 **Individual Note Encryption**: Encrypt only the notes you want
 - 📁 **Folder Encryption**: Encrypt all notes in a folder with one password
 - 🎨 **Visual Indicators**: Automatic prefix on encrypted note filenames (🔒)
-- ⌨️ **Multiple Access Methods**: Ribbon icon, commands, and hotkeys
 - 💪 **Password Strength Indicator**: Visual feedback on password strength
 - 🔐 **No Password Storage**: Your password is never stored or cached
+- 🛡️ **Double Encryption Protection**: Prevents accidental re-encryption
 
 ## Installation
 
@@ -32,26 +32,50 @@ A simple, secure Obsidian plugin that encrypts individual notes with password pr
 
 ### Encrypting a Note
 
-1. Open the note you want to encrypt
-2. Click the lock icon 🔒 in the ribbon, or use Command Palette: "Encrypt current note"
+**Option 1: Right-click Context Menu**
+1. Right-click on any `.md` file in the file explorer
+2. Select "🔐 Encrypt note"
 3. Enter and confirm your password
-4. The note will be encrypted and the filename prefixed with 🔒
+
+**Option 2: Command Palette**
+1. Open the note you want to encrypt
+2. Use Command Palette (Ctrl/Cmd+P): "Encrypt current note"
+3. Enter and confirm your password
+
+The note will be encrypted and the filename prefixed with 🔒.
 
 ### Decrypting a Note
 
-1. Open an encrypted note
-2. Click the lock icon 🔒 in the ribbon, or use Command Palette: "Decrypt current note"
+**Option 1: Right-click Context Menu**
+1. Right-click on an encrypted note in the file explorer
+2. Select "🔓 Decrypt note"
 3. Enter your password
-4. The note will be decrypted
+
+**Option 2: Command Palette**
+1. Open an encrypted note
+2. Use Command Palette: "Decrypt current note"
+3. Enter your password
 
 ### Encrypting/Decrypting a Folder
 
-1. Use Command Palette: "Encrypt all notes in a folder" or "Decrypt all notes in a folder"
-2. Select the folder from the list
+**Option 1: Right-click Context Menu**
+1. Right-click on any folder in the file explorer
+2. Select "🔐 Encrypt folder" or "🔓 Decrypt folder"
 3. Enter password (all notes will use the same password)
 4. Notes will be processed recursively (including subfolders)
 
-### Settings- **Encrypted note prefix/suffix**: Customize filename indicators
+**Option 2: Command Palette**
+1. Use Command Palette: "Encrypt all notes in a folder" or "Decrypt all notes in a folder"
+2. Select the folder from the list
+3. Enter password
+
+### Toggle Encryption
+
+Use Command Palette: "Toggle encryption" to automatically encrypt or decrypt the current note based on its current state.
+
+## Settings
+
+- **Encrypted note prefix/suffix**: Customize filename indicators (default: 🔒)
 - **Minimum password length**: Set minimum required characters (default: 8)
 - **Show password strength**: Enable/disable the strength indicator
 
@@ -61,11 +85,21 @@ A simple, secure Obsidian plugin that encrypts individual notes with password pr
 |----------|-------|
 | Algorithm | AES-256-GCM |
 | Key Derivation | PBKDF2-SHA256 |
-| Iterations | 310,000 |
+| Iterations | 310,000 (OWASP recommended) |
 | Salt | 128-bit random per encryption |
 | IV | 96-bit random per encryption |
 
 ⚠️ **Important**: There is no way to recover an encrypted note without the correct password. Always keep backups.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| Encrypt current note | Encrypt the active note |
+| Decrypt current note | Decrypt the active note |
+| Toggle encryption | Smart encrypt/decrypt based on state |
+| Encrypt all notes in a folder | Batch encrypt a folder |
+| Decrypt all notes in a folder | Batch decrypt a folder |
 
 ## License
 

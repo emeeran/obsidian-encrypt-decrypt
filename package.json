@@ -15,7 +15,7 @@
     "security",
     "aes-256"
   ],
-  "author": "",
+  "author": "Meeran E Mandhini",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^16.11.6",
