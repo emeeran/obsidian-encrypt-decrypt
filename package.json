@@ -1,7 +1,7 @@
 {
   "name": "obsidian-note-encryptor",
-  "version": "2.0.0",
-  "description": "Encrypt entire notes or selected text inline with AES-256-GCM encryption",
+  "version": "2.1.0",
+  "description": "Encrypt notes with AES-256-GCM. Features password generator, encrypted backups, HMAC integrity, Web Worker support, and batch folder encryption.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -19,7 +19,9 @@
     "security",
     "aes-256",
     "privacy",
-    "password-protection"
+    "password-protection",
+    "backup",
+    "password-generator"
   ],
   "author": "Meeran E Mandhini",
   "license": "MIT",

@@ -1,10 +1,10 @@
 {
 	"name": "Note Encryptor",
 	"id": "note-encryptor",
-	"version": "1.1.0",
+	"version": "2.1.0",
 	"main": "main.js",
 	"minAppVersion": "1.0.0",
-	"description": "Encrypt entire notes or selected text inline with AES-256-GCM encryption. Features password strength indicator, folder batch encryption, and secure content hiding.",
+	"description": "Encrypt notes with AES-256-GCM. Features password generator, encrypted backups, HMAC integrity, Web Worker support, and batch folder encryption.",
 	"author": "emeeran",
 	"authorUrl": "https://github.com/emeeran",
 	"fundingUrl": "",
