@@ -1,0 +1,1243 @@
+/* Note Encryptor Plugin Styles v2.0 - Enhanced UI */
+
+/* ============================================
+   Variables & Base
+   ============================================ */
+
+:root {
+    --encrypt-success: #28a745;
+    --encrypt-warning: #ffc107;
+    --encrypt-danger: #dc3545;
+    --encrypt-info: #17a2b8;
+}
+
+/* ============================================
+   Password Modal - Enhanced
+   ============================================ */
+
+.note-encryptor-modal {
+    padding: 24px;
+    max-width: 440px;
+}
+
+.password-modal-enhanced .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.password-modal-enhanced .modal-header h2 {
+    margin: 0;
+    font-size: 1.4em;
+}
+
+.password-modal-enhanced .mode-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--background-secondary);
+    border-radius: 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.password-modal-enhanced .mode-icon {
+    font-size: 14px;
+}
+
+.password-modal-enhanced .form-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.password-modal-enhanced .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.password-modal-enhanced .input-label {
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--text-normal);
+}
+
+.password-modal-enhanced .input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-modal-enhanced .password-input {
+    width: 100%;
+    padding: 12px 44px 12px 14px;
+    border: 2px solid var(--background-modifier-border);
+    border-radius: 10px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 15px;
+    font-family: var(--font-interface);
+    transition: all 0.2s ease;
+}
+
+.password-modal-enhanced .password-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 4px rgba(var(--interactive-accent-rgb), 0.15);
+}
+
+.password-modal-enhanced .password-input::placeholder {
+    color: var(--text-faint);
+}
+
+/* Password visibility toggle */
+.password-modal-enhanced .visibility-toggle {
+    position: absolute;
+    right: 12px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    user-select: none;
+    transition: background 0.15s ease;
+}
+
+.password-modal-enhanced .visibility-toggle:hover {
+    background: var(--background-modifier-hover);
+}
+
+.password-modal-enhanced .visibility-toggle .eye-off-icon {
+    display: none;
+}
+
+.password-modal-enhanced .visibility-toggle.hide-password .eye-icon {
+    display: none;
+}
+
+.password-modal-enhanced .visibility-toggle.hide-password .eye-off-icon {
+    display: inline;
+}
+
+/* Strength indicator - Enhanced */
+.password-modal-enhanced .strength-container {
+    padding: 14px 16px;
+    background: var(--background-secondary);
+    border-radius: 10px;
+    margin-top: 4px;
+}
+
+.password-modal-enhanced .strength-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.password-modal-enhanced .strength-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.password-modal-enhanced .strength-text {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.password-modal-enhanced .strength-bar {
+    height: 6px;
+    background: var(--background-modifier-border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.password-modal-enhanced .strength-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.password-modal-enhanced .strength-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.password-modal-enhanced .strength-criterion {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-faint);
+    padding: 3px 8px;
+    background: var(--background-primary);
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.password-modal-enhanced .strength-criterion.passed {
+    color: var(--encrypt-success);
+}
+
+.password-modal-enhanced .strength-criterion.passed .criterion-check {
+    color: var(--encrypt-success);
+}
+
+/* Password match indicator */
+.password-modal-enhanced .match-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.password-modal-enhanced .match-indicator.visible {
+    opacity: 1;
+}
+
+.password-modal-enhanced .match-indicator .match-yes {
+    display: none;
+    color: var(--encrypt-success);
+}
+
+.password-modal-enhanced .match-indicator .match-no {
+    display: none;
+    color: var(--encrypt-danger);
+}
+
+.password-modal-enhanced .match-indicator.matching .match-yes {
+    display: inline;
+}
+
+.password-modal-enhanced .match-indicator.mismatch .match-no {
+    display: inline;
+}
+
+.password-modal-enhanced .match-indicator.matching .match-text {
+    color: var(--encrypt-success);
+}
+
+.password-modal-enhanced .match-indicator.mismatch .match-text {
+    color: var(--encrypt-danger);
+}
+
+/* Remember password */
+.password-modal-enhanced .remember-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.password-modal-enhanced .remember-group input[type="checkbox"] {
+    accent-color: var(--interactive-accent);
+    width: 16px;
+    height: 16px;
+}
+
+.password-modal-enhanced .remember-group label {
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+/* Error message - Enhanced */
+.password-modal-enhanced .error-message {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    background: rgba(220, 53, 69, 0.1);
+    border: 1px solid rgba(220, 53, 69, 0.2);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--encrypt-danger);
+    margin-top: 16px;
+}
+
+.password-modal-enhanced .error-icon {
+    margin-right: 8px;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+}
+
+.password-modal-enhanced .error-message.shake {
+    animation: shake 0.4s ease;
+}
+
+/* Buttons - Enhanced */
+.password-modal-enhanced .button-container {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.password-modal-enhanced .btn-secondary {
+    flex: 1;
+    padding: 12px 20px;
+    border: 2px solid var(--background-modifier-border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-normal);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.password-modal-enhanced .btn-secondary:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border-hover);
+}
+
+.password-modal-enhanced .btn-primary {
+    flex: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 10px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(var(--interactive-accent-rgb), 0.25);
+}
+
+.password-modal-enhanced .btn-primary:hover {
+    background: var(--interactive-accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(var(--interactive-accent-rgb), 0.35);
+}
+
+.password-modal-enhanced .btn-primary:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.password-modal-enhanced .btn-primary.loading {
+    position: relative;
+}
+
+@keyframes spinner {
+    to { transform: rotate(360deg); }
+}
+
+.password-modal-enhanced .loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spinner 0.6s linear infinite;
+    margin-left: 8px;
+}
+
+/* Lockout state */
+.password-modal-enhanced .lockout-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.password-modal-enhanced .lockout-icon {
+    font-size: 48px;
+    margin-bottom: 20px;
+    animation: lockPulse 2s ease-in-out infinite;
+}
+
+@keyframes lockPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+.password-modal-enhanced .lockout-title {
+    color: var(--encrypt-warning);
+    margin-bottom: 12px;
+}
+
+.password-modal-enhanced .lockout-message {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+
+.password-modal-enhanced .lockout-countdown {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--interactive-accent);
+    font-family: var(--font-monospace);
+}
+
+/* ============================================
+   Inline Decrypt Modal
+   ============================================ */
+
+.note-encryptor-modal .decrypted-container {
+    margin: 16px 0;
+    padding: 18px;
+    background: var(--background-secondary);
+    border-radius: 10px;
+    border: 1px solid var(--background-modifier-border);
+    font-family: var(--font-monospace);
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+/* ============================================
+   Folder Selection Modal
+   ============================================ */
+
+.folder-selection-modal {
+    padding: 20px;
+}
+
+.folder-selection-modal h2 {
+    margin-bottom: 16px;
+}
+
+.folder-selection-modal .folder-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+}
+
+.folder-selection-modal .folder-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--background-modifier-border);
+    transition: all 0.15s ease;
+}
+
+.folder-selection-modal .folder-item:last-child {
+    border-bottom: none;
+}
+
+.folder-selection-modal .folder-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.folder-selection-modal .folder-item:focus {
+    background-color: var(--background-modifier-hover);
+    outline: none;
+}
+
+/* ============================================
+   Progress Modal - Enhanced
+   ============================================ */
+
+.progress-modal {
+    padding: 28px;
+    max-width: 520px;
+}
+
+.progress-modal .progress-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--background-modifier-border);
+}
+
+.progress-modal .progress-header h2 {
+    margin: 0;
+    font-size: 1.3em;
+    flex: 1;
+}
+
+.progress-modal .progress-icon {
+    font-size: 28px;
+}
+
+.progress-modal .status-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.progress-modal .status-badge.running {
+    background: rgba(23, 162, 184, 0.15);
+    color: #17a2b8;
+}
+
+.progress-modal .status-badge.completed {
+    background: rgba(40, 167, 69, 0.15);
+    color: #28a745;
+}
+
+/* Progress section */
+.progress-modal .progress-section {
+    margin-bottom: 24px;
+}
+
+.progress-modal .progress-bar-container {
+    margin-bottom: 12px;
+}
+
+.progress-modal .progress-track {
+    height: 12px;
+    background: var(--background-modifier-border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.progress-modal .progress-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.4s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-modal .progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: shimmer 2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.progress-modal .progress-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.progress-modal .stat-percent {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: var(--font-monospace);
+}
+
+.progress-modal .stat-fraction {
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* Current file section */
+.progress-modal .current-file-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+    background: var(--background-secondary);
+    border-radius: 10px;
+    margin-bottom: 20px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.progress-modal .current-file-section .file-icon {
+    font-size: 18px;
+}
+
+.progress-modal .current-file-section .file-name {
+    flex: 1;
+    font-size: 13px;
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Status grid */
+.progress-modal .status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.progress-modal .status-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px;
+    background: var(--background-secondary);
+    border-radius: 10px;
+    border: 1px solid var(--background-modifier-border);
+    transition: all 0.2s ease;
+}
+
+.progress-modal .status-item.success {
+    border-color: rgba(40, 167, 69, 0.3);
+}
+
+.progress-modal .status-item.fail {
+    border-color: rgba(220, 53, 69, 0.3);
+}
+
+.progress-modal .status-item.fail.has-errors {
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.progress-modal .status-item .status-icon {
+    font-size: 20px;
+    margin-bottom: 6px;
+}
+
+.progress-modal .status-item .status-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.progress-modal .status-item .status-value {
+    font-size: 22px;
+    font-weight: 700;
+    font-family: var(--font-monospace);
+}
+
+.progress-modal .status-item.success .status-icon,
+.progress-modal .status-item.success .status-value {
+    color: var(--encrypt-success);
+}
+
+.progress-modal .status-item.fail .status-icon,
+.progress-modal .status-item.fail .status-value {
+    color: var(--encrypt-danger);
+}
+
+.progress-modal .status-item.remaining .status-icon,
+.progress-modal .status-item.remaining .status-value {
+    color: var(--text-muted);
+}
+
+/* Time section */
+.progress-modal .time-section {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 13px;
+}
+
+.progress-modal .time-label {
+    color: var(--text-muted);
+}
+
+.progress-modal .time-value {
+    font-family: var(--font-monospace);
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+/* Actions */
+.progress-modal .actions-container {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.progress-modal .cancel-btn {
+    padding: 12px 28px;
+    font-size: 14px;
+    font-weight: 500;
+    background: transparent;
+    color: var(--encrypt-danger);
+    border: 2px solid var(--encrypt-danger);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.progress-modal .cancel-btn:hover {
+    background: var(--encrypt-danger);
+    color: white;
+}
+
+.progress-modal .cancel-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.progress-modal .close-btn {
+    padding: 12px 32px;
+    font-size: 14px;
+    font-weight: 600;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(var(--interactive-accent-rgb), 0.25);
+}
+
+.progress-modal .close-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(var(--interactive-accent-rgb), 0.35);
+}
+
+/* Completion section */
+.progress-modal .completion-section {
+    text-align: center;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.progress-modal .completion-icon {
+    font-size: 56px;
+    margin-bottom: 16px;
+}
+
+.progress-modal .completion-icon.success {
+    animation: successPop 0.5s ease;
+}
+
+@keyframes successPop {
+    0% { transform: scale(0); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+.progress-modal .completion-icon.warning {
+    animation: warningPulse 0.5s ease;
+}
+
+@keyframes warningPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+.progress-modal .completion-message {
+    font-size: 1.4em;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
+.progress-modal .completion-message.completed {
+    color: var(--encrypt-success);
+}
+
+.progress-modal .completion-message.cancelled {
+    color: var(--encrypt-warning);
+}
+
+/* Summary grid */
+.progress-modal .summary-grid {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 20px;
+}
+
+.progress-modal .summary-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 24px;
+    background: var(--background-secondary);
+    border-radius: 12px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.progress-modal .summary-stat .stat-icon {
+    font-size: 24px;
+    margin-bottom: 8px;
+}
+
+.progress-modal .summary-stat .stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.progress-modal .summary-stat .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: var(--font-monospace);
+}
+
+.progress-modal .summary-stat.success .stat-icon,
+.progress-modal .summary-stat.success .stat-value {
+    color: var(--encrypt-success);
+}
+
+.progress-modal .summary-stat.fail .stat-icon,
+.progress-modal .summary-stat.fail .stat-value {
+    color: var(--encrypt-danger);
+}
+
+/* Total time */
+.progress-modal .total-time {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+}
+
+.progress-modal .total-time .time-label {
+    color: var(--text-muted);
+}
+
+.progress-modal .total-time .time-value {
+    font-family: var(--font-monospace);
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+/* Failed files section */
+.progress-modal .failed-files-section {
+    margin-top: 24px;
+    padding: 18px;
+    background: rgba(220, 53, 69, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(220, 53, 69, 0.2);
+    text-align: left;
+}
+
+.progress-modal .failed-files-section h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: var(--encrypt-danger);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.progress-modal .failed-files-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.progress-modal .failed-file-item {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: var(--background-primary);
+    border-radius: 6px;
+    border-left: 3px solid var(--encrypt-danger);
+}
+
+.progress-modal .failed-file-item:last-child {
+    margin-bottom: 0;
+}
+
+.progress-modal .failed-file-item .file-name {
+    font-size: 13px;
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+    margin-bottom: 4px;
+}
+
+.progress-modal .failed-file-item .file-error {
+    font-size: 11px;
+    color: var(--encrypt-danger);
+}
+
+.progress-modal .more-errors {
+    text-align: center;
+    padding: 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* File legend */
+.progress-modal .file-legend {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    padding: 12px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.progress-modal .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.progress-modal .legend-icon {
+    font-size: 14px;
+}
+
+/* ============================================
+   Settings Page - Enhanced
+   ============================================ */
+
+.note-encryptor-settings {
+    max-width: 700px;
+}
+
+.note-encryptor-settings .settings-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+}
+
+.note-encryptor-settings .settings-header h2 {
+    margin: 0;
+}
+
+.note-encryptor-settings .version-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 12px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-radius: 12px;
+}
+
+.note-encryptor-settings .section-header {
+    margin-top: 36px;
+    margin-bottom: 18px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--background-modifier-border);
+}
+
+.note-encryptor-settings .section-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+    color: var(--text-normal);
+}
+
+/* Quick Start Card */
+.note-encryptor-settings .quick-start-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 18px;
+    background: var(--background-secondary);
+    border-radius: 12px;
+    border: 1px solid var(--background-modifier-border);
+    margin-top: 14px;
+}
+
+.note-encryptor-settings .shortcut-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    background: var(--background-primary);
+    border-radius: 10px;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.note-encryptor-settings .shortcut-item:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border);
+}
+
+.note-encryptor-settings .shortcut-icon {
+    font-size: 22px;
+    width: 36px;
+    text-align: center;
+}
+
+.note-encryptor-settings .shortcut-content {
+    flex: 1;
+}
+
+.note-encryptor-settings .shortcut-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-normal);
+}
+
+.note-encryptor-settings .shortcut-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.note-encryptor-settings .shortcut-key {
+    font-size: 11px;
+    font-family: var(--font-monospace);
+    padding: 5px 10px;
+    background: var(--background-modifier-border);
+    border-radius: 6px;
+    color: var(--text-muted);
+}
+
+/* Profile Selection */
+.note-encryptor-settings .profile-selection {
+    margin-top: 14px;
+}
+
+.note-encryptor-settings .profile-label {
+    margin-bottom: 14px;
+}
+
+.note-encryptor-settings .profile-label .label-text {
+    font-weight: 600;
+    color: var(--text-normal);
+    display: block;
+    margin-bottom: 4px;
+}
+
+.note-encryptor-settings .profile-label .label-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.note-encryptor-settings .profile-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+}
+
+.note-encryptor-settings .profile-card {
+    padding: 18px;
+    background: var(--background-secondary);
+    border: 2px solid transparent;
+    border-radius: 12px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s ease;
+}
+
+.note-encryptor-settings .profile-card:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border);
+    transform: translateY(-2px);
+}
+
+.note-encryptor-settings .profile-card.selected {
+    border-color: var(--interactive-accent);
+    background: rgba(var(--interactive-accent-rgb), 0.1);
+    box-shadow: 0 4px 16px rgba(var(--interactive-accent-rgb), 0.15);
+}
+
+.note-encryptor-settings .profile-icon {
+    font-size: 32px;
+    display: block;
+    margin-bottom: 10px;
+}
+
+.note-encryptor-settings .profile-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-normal);
+    margin-bottom: 6px;
+}
+
+.note-encryptor-settings .profile-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 10px;
+    min-height: 32px;
+}
+
+.note-encryptor-settings .profile-speed {
+    font-size: 10px;
+    font-family: var(--font-monospace);
+    padding: 4px 10px;
+    background: var(--background-primary);
+    border-radius: 6px;
+    color: var(--text-faint);
+}
+
+/* Sub-settings (conditional) */
+.note-encryptor-settings .sub-settings {
+    margin-left: 28px;
+    padding-left: 18px;
+    border-left: 3px solid var(--interactive-accent);
+    margin-top: 12px;
+}
+
+.note-encryptor-settings .sub-settings .setting-item {
+    border: none;
+    padding: 10px 0;
+}
+
+/* Security Card */
+.note-encryptor-settings .security-card {
+    padding: 24px;
+    background: var(--background-secondary);
+    border-radius: 12px;
+    border: 1px solid var(--background-modifier-border);
+    margin-top: 14px;
+}
+
+.note-encryptor-settings .tech-info h4 {
+    margin: 0 0 14px 0;
+    font-size: 14px;
+    color: var(--text-normal);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.note-encryptor-settings .tech-info ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.note-encryptor-settings .tech-info li {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 8px 0;
+}
+
+.note-encryptor-settings .warning-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: rgba(255, 193, 7, 0.1);
+    border-radius: 10px;
+    border-left: 4px solid var(--encrypt-warning);
+}
+
+.note-encryptor-settings .warning-icon {
+    font-size: 20px;
+}
+
+.note-encryptor-settings .warning-text {
+    font-size: 13px;
+    color: var(--text-normal);
+    line-height: 1.6;
+}
+
+.theme-dark .note-encryptor-settings .warning-box {
+    background: rgba(255, 193, 7, 0.08);
+}
+
+/* Footer */
+.note-encryptor-settings .settings-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--background-modifier-border);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.note-encryptor-settings .settings-footer a {
+    color: var(--interactive-accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.note-encryptor-settings .settings-footer a:hover {
+    text-decoration: underline;
+}
+
+/* ============================================
+   Inline Encryption Markers
+   ============================================ */
+
+.cm-line:has([class*="inline-encrypted"]),
+.inline-encrypted-marker {
+    background: rgba(var(--interactive-accent-rgb), 0.1);
+    border-radius: 3px;
+}
+
+/* ============================================
+   Accessibility
+   ============================================ */
+
+.note-encryptor-modal button:focus,
+.folder-selection-modal .folder-item:focus,
+.progress-modal button:focus,
+.note-encryptor-settings .profile-card:focus {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+    .password-modal-enhanced .password-input,
+    .note-encryptor-settings .profile-card {
+        border-width: 2px;
+    }
+
+    .progress-modal .progress-bar {
+        border: 2px solid var(--text-normal);
+    }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .password-modal-enhanced .lockout-icon,
+    .password-modal-enhanced .strength-fill,
+    .progress-modal .progress-fill,
+    .note-encryptor-settings .profile-card {
+        animation: none;
+        transition: none;
+    }
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .note-encryptor-settings .profile-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .password-modal-enhanced .button-container {
+        flex-direction: column;
+    }
+
+    .password-modal-enhanced .btn-primary,
+    .password-modal-enhanced .btn-secondary {
+        flex: none;
+        width: 100%;
+    }
+}
